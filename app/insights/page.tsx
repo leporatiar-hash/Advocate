@@ -10,8 +10,11 @@ import {
   buildMetricRows, filterByTimeframe,
   type MetricRow, type MetricPoint, type Timeframe,
 } from "../lib/insights";
-import type { Patient, DailyLog } from "../lib/types";
+import type { Patient, DailyLog, AssessmentStatusItem } from "../lib/types";
 import MetricDetailClient from "./[metric]/MetricDetailClient";
+import { Sparkline } from "../components/Sparkline";
+
+const NUDGE_DISMISSED_KEY = "truefit_assessments_nudge_dismissed";
 
 // ── Severity color ────────────────────────────────────────────────────────────
 
@@ -33,30 +36,6 @@ function computeWindowChange(points: MetricPoint[]): number | null {
   const secondAvg = second.reduce((s, p) => s + p.value, 0) / second.length;
   const diff = secondAvg - firstAvg;
   return Math.abs(diff) < 0.05 ? 0 : diff;
-}
-
-// ── Sparkline ─────────────────────────────────────────────────────────────────
-
-function Sparkline({ points, color }: { points: MetricPoint[]; color: string }) {
-  const W = 56, H = 24, P = 2;
-  if (points.length < 2) {
-    return (
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0">
-        <line x1={P} y1={H / 2} x2={W - P} y2={H / 2} stroke="#E2E8F0" strokeWidth={1.5} strokeLinecap="round" />
-      </svg>
-    );
-  }
-  const vals = points.map((p) => p.value);
-  const minV = Math.min(...vals), maxV = Math.max(...vals);
-  const range = maxV - minV || 1;
-  const xs = points.map((_, i) => P + (i / (points.length - 1)) * (W - P * 2));
-  const ys = points.map((p) => H - P - ((p.value - minV) / range) * (H - P * 2));
-  const d = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${ys[i].toFixed(1)}`).join(" ");
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0">
-      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
 }
 
 // ── Time toggle ───────────────────────────────────────────────────────────────
@@ -248,6 +227,8 @@ export default function InsightsPage() {
   const [dataLoading, setDataLoading] = useState(true);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<Timeframe>("1W");
+  const [dueAssessments, setDueAssessments] = useState<AssessmentStatusItem[]>([]);
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -257,12 +238,24 @@ export default function InsightsPage() {
       setPatient(p);
       const logsData = (await api.getLogs(p.id)) as DailyLog[];
       setLogs(logsData);
+      api.getAssessmentStatus(p.id)
+        .then((status) => setDueAssessments((status as AssessmentStatusItem[]).filter((s) => s.due)))
+        .catch(() => {});
     } catch {
       // silent
     } finally {
       setDataLoading(false);
     }
   }, [router]);
+
+  useEffect(() => {
+    setNudgeDismissed(sessionStorage.getItem(NUDGE_DISMISSED_KEY) === "1");
+  }, []);
+
+  function dismissNudge() {
+    sessionStorage.setItem(NUDGE_DISMISSED_KEY, "1");
+    setNudgeDismissed(true);
+  }
 
   useEffect(() => {
     if (!isLoading && !user) { router.push("/login"); return; }
@@ -339,6 +332,25 @@ export default function InsightsPage() {
             <p className="text-base text-slate-500 mt-1">{patient.name}</p>
           )}
         </div>
+
+        {/* Assessments nudge */}
+        {dueAssessments.length > 0 && !nudgeDismissed && (
+          <div className="bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <Link href="/assessments" className="text-base font-semibold text-navy">
+                {dueAssessments.length} monthly check-in{dueAssessments.length > 1 ? "s" : ""} available
+              </Link>
+            </div>
+            <button
+              type="button"
+              onClick={dismissNudge}
+              aria-label="Dismiss"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 flex-shrink-0"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Time toggle */}
         <TimeframeToggle current={timeframe} onChange={setTimeframe} activeColor={dominantSeverityColor} />

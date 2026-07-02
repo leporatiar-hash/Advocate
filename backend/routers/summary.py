@@ -12,10 +12,67 @@ from database import get_db
 import models
 from auth import get_current_user
 from routers.medications import lookup_known_side_effects
+from instruments import INSTRUMENTS
 
 load_dotenv()
 
 router = APIRouter()
+
+
+def _build_assessment_data(patient_id: int, start_date, end_date, db: Session) -> dict:
+    """Assessment scores for the clinician export. CSI is excluded because
+    instruments.INSTRUMENTS["csi"]["in_export"] is False — filtering happens
+    on that config flag, never on a hardcoded instrument name, so CSI never
+    leaks into any summary payload."""
+    export_keys = [key for key, inst in INSTRUMENTS.items() if inst["in_export"]]
+
+    assessment_data = {}
+    for key in export_keys:
+        in_range = (
+            db.query(models.Assessment)
+            .filter(
+                models.Assessment.patient_id == patient_id,
+                models.Assessment.instrument_key == key,
+                models.Assessment.created_at >= datetime.combine(start_date, datetime.min.time()),
+                models.Assessment.created_at <= datetime.combine(end_date, datetime.max.time()),
+            )
+            .order_by(models.Assessment.created_at.asc())
+            .all()
+        )
+        if not in_range:
+            continue
+
+        baseline = (
+            db.query(models.Assessment)
+            .filter(
+                models.Assessment.patient_id == patient_id,
+                models.Assessment.instrument_key == key,
+                models.Assessment.created_at < datetime.combine(start_date, datetime.min.time()),
+            )
+            .order_by(models.Assessment.created_at.desc())
+            .first()
+        )
+
+        scores = []
+        for a in in_range:
+            entry = {"date": a.created_at.date().isoformat(), "score": a.computed_score}
+            if key == "phq9":
+                entry["mode"] = a.completion_mode
+            scores.append(entry)
+
+        latest = scores[-1]["score"]
+        previous = baseline.computed_score if baseline else (scores[-2]["score"] if len(scores) > 1 else None)
+        delta = round(latest - previous, 1) if previous is not None else None
+
+        assessment_data[key] = {
+            "name": INSTRUMENTS[key]["name"],
+            "max_score": INSTRUMENTS[key]["max_score"],
+            "scores": scores,
+            "latest": latest,
+            "delta": delta,
+        }
+
+    return assessment_data
 
 
 def _calculate_adherence(logs, medications):
@@ -82,7 +139,7 @@ def generate_summary(
     date_range_days = (end_date - start_date).days + 1
 
     if not logs:
-        return {
+        no_log_summary = {
             "executive_summary": f"No health data has been logged in the selected date range ({start_date} to {end_date}).",
             "adherence": [],
             "patterns": [],
@@ -90,6 +147,10 @@ def generate_summary(
             "discussion_items": [],
             "adherence_data": {},
         }
+        assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
+        if assessment_data:
+            no_log_summary["assessment_data"] = assessment_data
+        return no_log_summary
 
     medications = (
         db.query(models.Medication)
@@ -399,5 +460,9 @@ Please generate a summary as JSON with exactly these fields:
     summary_data["adherence_data"] = {
         str(mid): d for mid, d in adherence.items()
     }
+
+    assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
+    if assessment_data:
+        summary_data["assessment_data"] = assessment_data
 
     return summary_data

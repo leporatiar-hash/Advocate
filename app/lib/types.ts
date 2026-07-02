@@ -200,6 +200,63 @@ export interface SummaryResponse {
   lifestyle_notes: string[];
   discussion_items: string[];
   adherence_data?: Record<string, { name: string; percentage: number; days_taken: number; days_logged: number }>;
+  assessment_data?: Record<string, AssessmentDataEntry>;
+}
+
+export type InstrumentKey = "lawton_iadl" | "phq9" | "csi";
+
+export interface InstrumentOption {
+  value: number;
+  label: string;
+}
+
+export interface InstrumentQuestion {
+  id: string;
+  text: string;
+  options: InstrumentOption[];
+}
+
+export interface InstrumentDefinition {
+  name: string;
+  subject: "patient_observed" | "patient_self" | "caregiver_self";
+  description: string;
+  max_score: number;
+  stem: string | null;
+  questions: InstrumentQuestion[];
+}
+
+export interface AssessmentStatusItem {
+  instrument_key: InstrumentKey;
+  name: string;
+  description: string;
+  last_taken_at: string | null;
+  due: boolean;
+}
+
+export interface Assessment {
+  id: number;
+  patient_id: number;
+  caregiver_id: number;
+  instrument_key: InstrumentKey;
+  responses: Record<string, number>;
+  computed_score: number;
+  max_score: number;
+  completion_mode: "self" | "assisted" | null;
+  created_at: string;
+}
+
+export interface AssessmentScoreEntry {
+  date: string;
+  score: number;
+  mode?: "self" | "assisted";
+}
+
+export interface AssessmentDataEntry {
+  name: string;
+  max_score: number;
+  scores: AssessmentScoreEntry[];
+  latest: number;
+  delta: number | null;
 }
 
 export interface SavedSummary {

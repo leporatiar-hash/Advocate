@@ -299,6 +299,29 @@ class SocialContactResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Assessments ───────────────────────────────────────────────────────────────
+
+class AssessmentCreate(BaseModel):
+    patient_id: int
+    instrument_key: str
+    responses: Dict[str, int]
+    completion_mode: Optional[str] = None  # phq9 only: "self" | "assisted"
+
+
+class AssessmentResponse(BaseModel):
+    id: int
+    patient_id: int
+    caregiver_id: int
+    instrument_key: str
+    responses: Dict[str, int]
+    computed_score: float
+    max_score: float
+    completion_mode: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Saved Summaries ───────────────────────────────────────────────────────────
 
 class SavedSummaryCreate(BaseModel):

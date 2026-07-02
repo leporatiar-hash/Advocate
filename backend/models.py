@@ -163,6 +163,23 @@ class PasswordResetToken(Base):
     user = relationship("User")
 
 
+class Assessment(Base):
+    __tablename__ = "assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
+    caregiver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    instrument_key = Column(String, nullable=False, index=True)  # "lawton_iadl" | "phq9" | "csi"
+    responses = Column(JSON, nullable=False)          # {question_id: value}
+    computed_score = Column(Float, nullable=False)
+    max_score = Column(Float, nullable=False)
+    completion_mode = Column(String, nullable=True)   # phq9 only: "self" | "assisted"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    patient = relationship("Patient", foreign_keys=[patient_id])
+    caregiver = relationship("User", foreign_keys=[caregiver_id])
+
+
 class SavedSummary(Base):
     __tablename__ = "saved_summaries"
 

@@ -162,6 +162,14 @@ export const api = {
   deleteSocialContact: (id: number) =>
     request(`/api/social-contacts/${id}`, { method: "DELETE" }),
 
+  // Assessments
+  getInstrumentDefinitions: () => request("/assessments/instruments"),
+  getAssessmentStatus: (patientId: number) => request(`/assessments/${patientId}/status`),
+  getAssessments: (patientId: number, instrumentKey?: string) =>
+    request(`/assessments/${patientId}${instrumentKey ? `?instrument_key=${instrumentKey}` : ""}`),
+  createAssessment: (data: object) =>
+    request("/assessments/", { method: "POST", body: JSON.stringify(data) }),
+
   // Password reset
   forgotPassword: (email: string) =>
     request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),

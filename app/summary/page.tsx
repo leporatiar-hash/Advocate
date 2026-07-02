@@ -7,7 +7,7 @@ import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
-import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary } from "../lib/types";
+import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary, AssessmentDataEntry } from "../lib/types";
 
 const PRINT_STYLE = `
 @media print {
@@ -199,6 +199,45 @@ function MedSafetyCard({ data }: { data: Record<string, MedicationSideEffectSumm
               {info.clinical_note && (
                 <p className="text-sm leading-relaxed italic" style={{ color: "#475569" }}>{info.clinical_note}</p>
               )}
+            </div>
+          );
+        })}
+      </div>
+    </InsightCard>
+  );
+}
+
+// ── Assessment Scores card ───────────────────────────────────────────────────
+
+const MODE_LABEL: Record<string, string> = { self: "self-completed", assisted: "caregiver-assisted" };
+
+function AssessmentScoresCard({ data }: { data: Record<string, AssessmentDataEntry> }) {
+  const entries = Object.entries(data);
+  if (!entries.length) return null;
+  return (
+    <InsightCard title="Assessment Scores" accentColor="#2d4f38" bgColor="#f2f7f3" borderColor="#d4e0d7">
+      <div className="space-y-5">
+        {entries.map(([key, item]) => {
+          const trendText =
+            item.delta === null || Math.abs(item.delta) < 0.01
+              ? "No change"
+              : `${item.delta > 0 ? "Up" : "Down"} ${Math.abs(item.delta)} over this period`;
+          return (
+            <div key={key} className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-base font-semibold text-navy">{item.name}</span>
+                <span className="text-base font-bold text-navy">{item.latest} of {item.max_score}</span>
+              </div>
+              <p className="text-sm text-slate-500">{trendText}</p>
+              <div className="space-y-0.5 pt-1">
+                {item.scores.map((s, i) => (
+                  <p key={i} className="text-sm text-slate-400">
+                    {new Date(s.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    {" — "}{s.score}
+                    {s.mode && ` (${MODE_LABEL[s.mode] ?? s.mode})`}
+                  </p>
+                ))}
+              </div>
             </div>
           );
         })}
@@ -509,6 +548,11 @@ export default function SummaryPage() {
               <MedSafetyCard data={summary.medication_side_effects} />
             )}
 
+            {/* Assessment Scores */}
+            {summary.assessment_data && Object.keys(summary.assessment_data).length > 0 && (
+              <AssessmentScoresCard data={summary.assessment_data} />
+            )}
+
             {/* Patterns */}
             {summary.patterns?.length > 0 && (
               <InsightCard title="Patterns" accentColor="#3d4f47" bgColor="#f2f7f3" borderColor="#d4e0d7">
@@ -664,6 +708,9 @@ export default function SummaryPage() {
                       )}
                       {parsed.medication_side_effects && Object.keys(parsed.medication_side_effects).length > 0 && (
                         <MedSafetyCard data={parsed.medication_side_effects} />
+                      )}
+                      {parsed.assessment_data && Object.keys(parsed.assessment_data).length > 0 && (
+                        <AssessmentScoresCard data={parsed.assessment_data} />
                       )}
                       {parsed.patterns?.length > 0 && (
                         <InsightCard title="Patterns" accentColor="#3d4f47" bgColor="#f2f7f3" borderColor="#d4e0d7">
