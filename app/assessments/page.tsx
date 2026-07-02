@@ -147,9 +147,16 @@ export default function AssessmentsPage() {
       <div className="max-w-lg mx-auto pt-6 px-4 space-y-4">
 
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold text-navy">Assessments</h1>
-          {patient && <p className="text-base text-slate-500 mt-1">{patient.name}</p>}
+        <div className="flex items-center gap-3">
+          <Link href="/settings" className="w-9 h-9 rounded-full flex items-center justify-center bg-white border border-slate-200 text-slate-500 hover:text-navy transition-colors flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-navy">Assessments</h1>
+            {patient && <p className="text-base text-slate-500 mt-1">{patient.name}</p>}
+          </div>
         </div>
 
         {allCaughtUp && (
