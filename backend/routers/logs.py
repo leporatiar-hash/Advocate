@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from typing import List, Optional
 from datetime import datetime, timedelta, date as date_type
 
@@ -9,6 +9,15 @@ import schemas
 from auth import get_current_user
 
 router = APIRouter()
+
+# All DailyLogResponse fields except `photo`, which is handled separately so
+# list responses can defer loading it at the SQL level (see get_logs below).
+_LOG_RESPONSE_FIELDS = [
+    "id", "patient_id", "logged_by", "date", "medications_taken", "symptoms",
+    "medication_side_effects", "sleep_hours", "mood_score", "water_intake_oz",
+    "activities", "lifestyle", "notes", "episode", "vitals", "socialization",
+    "log_type", "created_at",
+]
 
 
 def _serialize_log_field(value):
@@ -287,12 +296,20 @@ def get_logs(
     _verify_patient(patient_id, current_user, db)
 
     query = db.query(models.DailyLog).filter(models.DailyLog.patient_id == patient_id)
+    if not include_photo:
+        query = query.options(defer(models.DailyLog.photo))
     if days is not None:
         query = query.filter(models.DailyLog.date >= date_type.today() - timedelta(days=days))
 
     logs = query.order_by(models.DailyLog.date.desc()).all()
-    result = [schemas.DailyLogResponse.model_validate(log) for log in logs]
-    if not include_photo:
-        for item in result:
-            item.photo = None
+
+    # `photo` is deferred at the SQL level above when not requested. Building the
+    # response from an explicit field list (rather than from_attributes on the
+    # whole object) avoids touching `.photo`, which would otherwise trigger a
+    # lazy per-row fetch and defeat the deferral.
+    result = []
+    for log in logs:
+        data = {f: getattr(log, f) for f in _LOG_RESPONSE_FIELDS}
+        data["photo"] = log.photo if include_photo else None
+        result.append(schemas.DailyLogResponse(**data))
     return result
