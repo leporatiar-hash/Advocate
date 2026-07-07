@@ -129,7 +129,13 @@ export const api = {
   // Logs
   createLog: (data: object) =>
     request("/logs/", { method: "POST", body: JSON.stringify(data) }),
-  getLogs: (patientId: number) => request(`/logs/${patientId}`),
+  getLogs: (patientId: number, opts?: { days?: number; includePhoto?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.days) params.set("days", String(opts.days));
+    if (opts?.includePhoto) params.set("include_photo", "true");
+    const qs = params.toString();
+    return request(`/logs/${patientId}${qs ? `?${qs}` : ""}`);
+  },
   getTodayLog: (patientId: number) => request(`/logs/${patientId}/today?date=${localDateStr()}`),
   getLogByDate: (patientId: number, date: string) => request(`/logs/${patientId}/date/${date}`),
   getMissedDays: (patientId: number) => request(`/logs/${patientId}/missed-days`),

@@ -279,14 +279,20 @@ def quick_log(
 @router.get("/{patient_id}", response_model=List[schemas.DailyLogResponse])
 def get_logs(
     patient_id: int,
+    days: Optional[int] = Query(default=None, description="Only return logs from the last N days"),
+    include_photo: bool = Query(default=False, description="Include base64 photo data in the response"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     _verify_patient(patient_id, current_user, db)
 
-    return (
-        db.query(models.DailyLog)
-        .filter(models.DailyLog.patient_id == patient_id)
-        .order_by(models.DailyLog.date.desc())
-        .all()
-    )
+    query = db.query(models.DailyLog).filter(models.DailyLog.patient_id == patient_id)
+    if days is not None:
+        query = query.filter(models.DailyLog.date >= date_type.today() - timedelta(days=days))
+
+    logs = query.order_by(models.DailyLog.date.desc()).all()
+    result = [schemas.DailyLogResponse.model_validate(log) for log in logs]
+    if not include_photo:
+        for item in result:
+            item.photo = None
+    return result

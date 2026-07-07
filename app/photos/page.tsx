@@ -28,7 +28,7 @@ export default function PhotosPage() {
       if (!patients.length) { router.push("/onboarding"); return; }
       const p = patients[0];
       setPatient(p);
-      const logsData = await api.getLogs(p.id) as DailyLog[];
+      const logsData = await api.getLogs(p.id, { includePhoto: true }) as DailyLog[];
       setLogs(logsData);
     } catch {
       // silent

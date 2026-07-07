@@ -224,7 +224,7 @@ export default function DashboardPage() {
       setPatient(p);
 
       const [logsData, todayData] = await Promise.all([
-        api.getLogs(p.id) as Promise<DailyLog[]>,
+        api.getLogs(p.id, { days: 400 }) as Promise<DailyLog[]>,
         api.getTodayLog(p.id) as Promise<DailyLog | null>,
       ]);
       setLogs(logsData);
