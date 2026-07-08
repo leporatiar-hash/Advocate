@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Lora, DM_Sans } from "next/font/google";
 import Link from "next/link";
+import { HeroSummaryCard } from "./components/HeroSummaryCard";
 
 const lora = Lora({
   subsets: ["latin"],
@@ -96,10 +97,6 @@ export default function LandingPage() {
           from { opacity: 0; transform: translateY(20px); }
           to   { opacity: 1; transform: translateY(0); }
         }
-        @keyframes scrollPulse {
-          0%, 100% { opacity: 0.4; }
-          50%       { opacity: 1; }
-        }
         .lp-reveal {
           opacity: 0;
           transform: translateY(24px);
@@ -129,6 +126,10 @@ export default function LandingPage() {
         .lp-trust-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(45,79,56,0.08); }
         .lp-nav-sticky-cta { display: inline-flex; align-items: center; font-size: 0.875rem; font-weight: 500; color: ${C.white}; background: ${C.sage}; padding: 8px 20px; border-radius: 100px; text-decoration: none; transition: background 0.2s, opacity 0.3s, transform 0.3s; white-space: nowrap; }
         .lp-nav-sticky-cta:hover { background: ${C.forest}; }
+        .lp-hero-grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; max-width: 1180px; width: 100%; margin: 0 auto; text-align: left; }
+        .lp-hero-copy { display: flex; flex-direction: column; align-items: flex-start; }
+        .lp-hero-card-col { display: flex; justify-content: center; }
+        .lp-hero-card-wrapper { width: 100%; max-width: 460px; }
         @media (max-width: 768px) {
           .lp-nav-links { display: none; }
           .lp-problem { grid-template-columns: 1fr !important; gap: 40px !important; }
@@ -143,9 +144,25 @@ export default function LandingPage() {
           .phone-image-wrapper { border-radius: 32px !important; }
           .lp-trust-grid { grid-template-columns: 1fr !important; }
           .lp-nav-sticky-cta { font-size: 0.8rem; padding: 7px 14px; }
+          .lp-hero-section { justify-content: flex-start !important; min-height: calc(100vh + 253px) !important; }
+          .lp-hero-grid { grid-template-columns: 1fr !important; text-align: center !important; }
+          .lp-hero-copy { align-items: center !important; }
+          .lp-hero-card-col {
+            position: absolute !important;
+            left: 50% !important;
+            top: 428px !important;
+            transform: translateX(-50%) !important;
+            width: 85% !important;
+            max-width: 420px !important;
+          }
+          .lp-hero-card-wrapper { max-width: 420px !important; }
         }
         .phone-image-wrapper { border-radius: 52px; overflow: hidden; position: relative; display: flex; justify-content: center; }
-        h2, h3 { text-wrap: balance; }
+        h1, h2, h3 { text-wrap: balance; }
+        .lp-hero-break { display: inline; }
+        @media (max-width: 399px) {
+          .lp-hero-break { display: none; }
+        }
       `}</style>
 
       {/* ── NAV ── */}
@@ -169,29 +186,30 @@ export default function LandingPage() {
       </nav>
 
       {/* ── HERO ── */}
-      <section id="hero" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "120px 24px 80px", position: "relative", overflow: "hidden" }}>
+      <section id="hero" className="lp-hero-section" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "120px 24px 0px", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse 70% 60% at 50% 30%, rgba(74,124,89,0.08) 0%, transparent 70%), radial-gradient(ellipse 40% 40% at 80% 70%, rgba(106,159,120,0.06) 0%, transparent 60%)", pointerEvents: "none" }} />
 
-        <h1 style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.4rem, 5.5vw, 5rem)", fontWeight: 500, lineHeight: 1.25, color: C.forest, maxWidth: 1200, width: "100%", marginBottom: 12, animation: "fadeUp 0.8s 0.35s both" }}>
-          The doctor sees a chart.<br />
-          <span style={{ color: C.sage }}>You see the whole person.</span>
-        </h1>
+        <div className="lp-hero-grid">
+          <div className="lp-hero-copy">
+            <h1 style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.4rem, 4.5vw, 3.6rem)", fontWeight: 500, lineHeight: 1.25, color: C.forest, marginBottom: 12, animation: "fadeUp 0.8s 0.35s both" }}>
+              <span style={{ display: "block" }}>The doctor sees<br className="lp-hero-break" /> a chart.</span>
+              <span style={{ display: "block", color: C.sage }}>You see the<br className="lp-hero-break" /> whole person.</span>
+            </h1>
 
-        <p style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.1rem, 2vw, 1.35rem)", color: C.inkSoft, marginBottom: 40, animation: "fadeUp 0.8s 0.5s both" }}>
-          You notice everything. Now there&apos;s a place to put it.
-        </p>
+            <p style={{ fontSize: "1.05rem", color: C.inkMid, maxWidth: 540, lineHeight: 1.7, marginBottom: 40, animation: "fadeUp 0.8s 0.65s both" }}>
+              You notice the small changes: the missed dose, the rough night, the mood that&apos;s been off for two weeks. This is where those observations go.
+            </p>
 
-        <p style={{ fontSize: "1.05rem", color: C.inkMid, maxWidth: 540, lineHeight: 1.7, marginBottom: 48, animation: "fadeUp 0.8s 0.65s both" }}>
-          You notice the small changes: the missed dose, the rough night, the mood that&apos;s been off for two weeks. This is where those observations go, and how they get in front of the doctor.
-        </p>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "flex-start", animation: "fadeUp 0.8s 0.8s both" }}>
+              <Link href="/signup" className="lp-btn-primary">Get Started Free →</Link>
+            </div>
+          </div>
 
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", animation: "fadeUp 0.8s 0.8s both" }}>
-          <Link href="/signup" className="lp-btn-primary">Get Started Free →</Link>
-          <Link href="/login" className="lp-btn-ghost">Log in</Link>
-        </div>
-
-        <div style={{ position: "absolute", bottom: 32, left: "50%", transform: "translateX(-50%)", display: "flex", flexDirection: "column", alignItems: "center", animation: "fadeUp 0.8s 1.2s both" }}>
-          <div style={{ width: 1, height: 40, background: `linear-gradient(to bottom, ${C.sage}, transparent)`, animation: "scrollPulse 2s ease-in-out infinite" }} />
+          <div className="lp-hero-card-col" style={{ animation: "fadeUp 0.8s 0.9s both" }}>
+            <div className="lp-hero-card-wrapper">
+              <HeroSummaryCard />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -227,7 +245,7 @@ export default function LandingPage() {
       <section id="how" style={{ background: C.sageMist, padding: "100px 24px" }}>
         <div className="lp-reveal" style={{ textAlign: "center", maxWidth: 600, margin: "0 auto 72px" }}>
           <div style={{ fontSize: "0.75rem", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: C.sage, marginBottom: 16 }}>How it works</div>
-          <h2 style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.8rem, 3.5vw, 2.6rem)", fontWeight: 500, lineHeight: 1.2, color: C.forest, marginBottom: 16 }}>
+          <h2 className="lp-how-heading" style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.5rem, 2.9vw, 2.15rem)", fontWeight: 500, lineHeight: 1.2, color: C.forest, marginBottom: 16 }}>
             <span style={{ display: "block" }}>A daily log that fits your routine</span><span style={{ display: "block", marginTop: "0.35em" }}>and your doctor can actually use.</span>
           </h2>
           <p style={{ fontSize: "1.05rem", color: C.inkSoft, lineHeight: 1.7 }}>
@@ -254,7 +272,7 @@ export default function LandingPage() {
       {/* ── APP SHOWCASE ── */}
       <section id="app" style={{ padding: "100px 24px", background: "#f2f4f1" }}>
         <div className="lp-reveal" style={{ textAlign: "center", maxWidth: 680, margin: "0 auto 80px" }}>
-          <div style={{ fontSize: "0.75rem", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#1B3A2D", marginBottom: 16 }}>The app</div>
+          <div style={{ fontSize: "0.75rem", fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "#1B3A2D", marginBottom: 16 }}>The platform</div>
           <h2 style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.8rem, 3.5vw, 2.6rem)", fontWeight: 500, lineHeight: 1.2, color: "#1B3A2D", marginBottom: 16 }}>
             Everything in one place.<br />Ready before every appointment.
           </h2>
@@ -277,7 +295,7 @@ export default function LandingPage() {
                 Dashboard
               </div>
               <h3 style={{ fontFamily: "var(--font-lora), serif", fontSize: "clamp(1.4rem, 2.5vw, 1.9rem)", fontWeight: 500, lineHeight: 1.25, color: "#1B3A2D", marginBottom: 16 }}>
-                Your patient overview
+                Everything about one person, in one place
               </h3>
               <p style={{ fontSize: "1rem", color: C.inkMid, lineHeight: 1.75, marginBottom: 24 }}>
                 At a glance, see what&apos;s been logged today, track adherence over time, and find everything you need before the next appointment. All of it organized around one person.
@@ -287,7 +305,7 @@ export default function LandingPage() {
                   "Daily checklist keeps you on track without feeling clinical",
                   "Your adherence percentage calculates itself from what you log",
                   "One tap to generate a summary or print a report for the doctor",
-                  "A streak counter that keeps you coming back, even on hard days",
+                  "A simple record of how consistently you've logged, no pressure attached",
                 ].map((b, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1B3A2D", marginTop: 8, flexShrink: 0 }} />
