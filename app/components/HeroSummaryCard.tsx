@@ -13,9 +13,21 @@ const COLORS = {
   slate400: "#94a3b8",
   good: "#16a34a",
   goodBg: "#dcfce7",
-  track: "#e2e8f0",
+  watch: "#b45309",
+  watchBg: "#fef3c7",
+  alert: "#b91c1c",
+  alertBg: "#fee2e2",
+  steady: "#64748b",
+  steadyBg: "#f1f5f9",
   bezel: "#111418",
 };
+
+import { Sparkline } from "./Sparkline";
+import type { MetricPoint } from "../lib/insights";
+
+function trend(values: number[]): MetricPoint[] {
+  return values.map((value, i) => ({ date: `d${i}`, value }));
+}
 
 // Design-time constants: content is authored at real in-app proportions
 // (as if a 390px-wide phone screen) then the whole screen is scaled down
@@ -24,7 +36,7 @@ const DESIGN_WIDTH = 390;
 const SCALE = 0.85;
 // Measured natural (pre-scale) height of the screen content below, times SCALE.
 // Hardcoded (not measured at runtime) to keep this component static.
-const SCREEN_HEIGHT = 974;
+const SCREEN_HEIGHT = 877;
 const BEZEL = 10;
 
 function InsightCard({
@@ -44,22 +56,22 @@ function InsightCard({
   );
 }
 
-function AdherenceRow({ name, pct, caption }: { name: string; pct: number; caption: string }) {
+function TrendRow({
+  name, direction, color, bg, points,
+}: {
+  name: string; direction: string; color: string; bg: string; points: MetricPoint[];
+}) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <span style={{ fontSize: 16, fontWeight: 600, color: COLORS.navy }}>{name}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, padding: "4px 10px", borderRadius: 999, background: COLORS.goodBg, color: COLORS.good }}>
-            Good
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: COLORS.navy }}>{name}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: bg, color }}>
+            {direction}
           </span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: COLORS.good }}>{pct}%</span>
         </div>
       </div>
-      <div style={{ width: "100%", height: 12, borderRadius: 999, background: COLORS.track }}>
-        <div style={{ width: `${pct}%`, height: 12, borderRadius: 999, background: COLORS.good }} />
-      </div>
-      <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, color: COLORS.slate400 }}>{caption}</p>
+      <Sparkline points={points} color={color} />
     </div>
   );
 }
@@ -72,6 +84,30 @@ function StatusBar() {
         <svg width="18" height="12" viewBox="0 0 18 12" fill="none"><rect x="0" y="7" width="3" height="5" rx="0.5" fill={COLORS.ink} /><rect x="5" y="5" width="3" height="7" rx="0.5" fill={COLORS.ink} /><rect x="10" y="3" width="3" height="9" rx="0.5" fill={COLORS.ink} /><rect x="15" y="0" width="3" height="12" rx="0.5" fill={COLORS.ink} /></svg>
         <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><path d="M8 10.5a1.2 1.2 0 100-2.4 1.2 1.2 0 000 2.4z" fill={COLORS.ink} /><path d="M8 6.2c1.4 0 2.7.5 3.7 1.4l-1.1 1.2A3.9 3.9 0 008 7.7c-1 0-1.9.3-2.6.9L4.3 7.6A5.4 5.4 0 018 6.2z" fill={COLORS.ink} /><path d="M8 2.2c2.5 0 4.8 1 6.5 2.6l-1.1 1.2A7.4 7.4 0 008 4c-2 0-3.8.8-5.4 2l-1.1-1.2A9.4 9.4 0 018 2.2z" fill={COLORS.ink} /></svg>
         <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="2.5" stroke={COLORS.ink} /><rect x="2" y="2" width="15" height="8" rx="1" fill={COLORS.ink} /><rect x="21.5" y="4" width="1.5" height="4" rx="0.5" fill={COLORS.ink} /></svg>
+      </div>
+    </div>
+  );
+}
+
+// Shared device chrome: the same phone bezel used by the hero mockup,
+// reused anywhere else a "logged on a phone" visual is needed.
+export function PhoneFrame({ width = DESIGN_WIDTH, children }: { width?: number; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        maxWidth: width + BEZEL * 2,
+        margin: "0 auto",
+        boxSizing: "border-box",
+        background: COLORS.bezel,
+        borderRadius: 44,
+        padding: BEZEL,
+        boxShadow: "0 24px 60px rgba(26,36,32,0.22)",
+      }}
+    >
+      <div style={{ width: "100%", background: COLORS.cream, borderRadius: 34, overflow: "hidden" }}>
+        <StatusBar />
+        {children}
       </div>
     </div>
   );
@@ -102,15 +138,9 @@ export function HeroSummaryCard() {
           width: DESIGN_WIDTH + BEZEL * 2,
           transform: "translateX(-50%) scale(var(--phone-scale, " + SCALE + "))",
           transformOrigin: "top center",
-          background: COLORS.bezel,
-          borderRadius: 44,
-          padding: BEZEL,
-          boxShadow: "0 24px 60px rgba(26,36,32,0.22)",
         }}
       >
-        <div style={{ width: DESIGN_WIDTH, background: COLORS.cream, borderRadius: 34, overflow: "hidden" }}>
-          <StatusBar />
-
+        <PhoneFrame width={DESIGN_WIDTH}>
           {/* Header — plain on screen background, matches real app (not a card) */}
           <div style={{ padding: "8px 16px 0", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
             <div>
@@ -122,33 +152,59 @@ export function HeroSummaryCard() {
             </span>
           </div>
 
-          <div style={{ padding: "20px 16px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ padding: "20px 16px 32px", display: "flex", flexDirection: "column", gap: 18 }}>
             <InsightCard title="Executive Summary" accentColor={COLORS.ink} bgColor={COLORS.white}>
-              <p style={{ margin: 0, fontSize: 16, lineHeight: 1.625, color: COLORS.slate700 }}>
-                Consistent medication adherence across all medications with no reported side effects. Sleep averaged 4 hours per night, correlating with increased restlessness and memory trouble.
+              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5, color: COLORS.slate700 }}>
+                Appetite declining over the past two weeks, with agitation spiking on low-sleep nights. Socialization improving since the schedule change.
               </p>
             </InsightCard>
 
-            <InsightCard title="Adherence" accentColor={COLORS.forest} bgColor={COLORS.sageMist}>
-              <AdherenceRow name="Clozapine" pct={100} caption="12/12 days taken · Full adherence observed on all logged days." />
-              <AdherenceRow name="Ativan" pct={92} caption="11/12 days taken · Missed at least one day." />
+            <InsightCard title="Symptom Trends" accentColor={COLORS.ink} bgColor={COLORS.white}>
+              <TrendRow
+                name="Appetite"
+                direction="Declining"
+                color={COLORS.watch}
+                bg={COLORS.watchBg}
+                points={trend([7, 7, 6, 6, 5, 5, 4, 4, 4, 3])}
+              />
+              <TrendRow
+                name="Fatigue"
+                direction="Steady"
+                color={COLORS.steady}
+                bg={COLORS.steadyBg}
+                points={trend([5, 6, 5, 5, 6, 5, 4, 5, 5, 5])}
+              />
+              <TrendRow
+                name="Socialization"
+                direction="Improving"
+                color={COLORS.good}
+                bg={COLORS.goodBg}
+                points={trend([2, 2, 3, 3, 4, 4, 5, 5, 6, 6])}
+              />
+              <TrendRow
+                name="Agitation"
+                direction="Spiking"
+                color={COLORS.alert}
+                bg={COLORS.alertBg}
+                points={trend([2, 2, 2, 6, 2, 2, 7, 2, 2, 3])}
+              />
             </InsightCard>
 
             <InsightCard title="Bring Up at the Appointment" accentColor={COLORS.forest} bgColor={COLORS.sageMist}>
               {[
-                "Evaluate strategies to address sleep disturbances.",
-                "Consider interventions to reduce isolation.",
+                "Sleep: averaging 4 hours, with agitation higher on those nights.",
+                "Appetite: declining since late June.",
               ].map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, background: COLORS.white, borderRadius: 12, padding: 16 }}>
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, background: COLORS.white, borderRadius: 12, padding: 14 }}>
                   <span
                     style={{
                       flexShrink: 0,
-                      width: 24,
-                      height: 24,
+                      width: 22,
+                      height: 22,
                       borderRadius: "50%",
                       background: COLORS.sage,
                       color: COLORS.white,
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: 700,
                       display: "flex",
                       alignItems: "center",
@@ -157,12 +213,16 @@ export function HeroSummaryCard() {
                   >
                     {i + 1}
                   </span>
-                  <p style={{ margin: 0, fontSize: 16, lineHeight: 1.5, color: COLORS.slate700 }}>{item}</p>
+                  <p style={{ margin: 0, fontSize: 15, lineHeight: 1.45, color: COLORS.slate700 }}>{item}</p>
                 </div>
               ))}
             </InsightCard>
+
+            <p style={{ margin: 0, fontSize: 13, color: COLORS.slate500 }}>
+              Adherence · Clozapine 91% · Ativan 84%
+            </p>
           </div>
-        </div>
+        </PhoneFrame>
       </div>
     </div>
   );
