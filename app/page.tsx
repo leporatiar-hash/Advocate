@@ -39,6 +39,15 @@ const SITE_URL = "https://advocatetrack.com";
 export default function LandingPage() {
   const [copied, setCopied] = useState(false);
   const [isScrolledPastHero, setIsScrolledPastHero] = useState(false);
+  const [debugInfo, setDebugInfo] = useState("");
+
+  useEffect(() => {
+    const rootFontSize = getComputedStyle(document.documentElement).fontSize;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time diagnostic snapshot, temporary
+    setDebugInfo(
+      `${window.innerWidth}x${window.innerHeight} dpr:${window.devicePixelRatio} root-font:${rootFontSize} zoom:${Math.round((window.visualViewport?.scale ?? 1) * 100)}%`
+    );
+  }, []);
 
   useEffect(() => {
     function onScroll() {
@@ -171,6 +180,11 @@ export default function LandingPage() {
           .lp-phone-frame { --phone-scale: 0.65; }
         }
       `}</style>
+
+      {/* ── TEMP DEBUG BADGE (remove after diagnosing mobile clipping) ── */}
+      <div style={{ position: "fixed", top: 0, left: 0, zIndex: 999, background: "#FFE600", color: "#000", fontSize: 11, fontFamily: "monospace", padding: "4px 8px", fontWeight: 700 }}>
+        {debugInfo}
+      </div>
 
       {/* ── NAV ── */}
       <nav className="lp-nav" style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 48px", height: 64, background: "rgba(250,249,246,0.88)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${C.rule}`, transition: "box-shadow 0.3s", boxShadow: isScrolledPastHero ? "0 2px 20px rgba(45,79,56,0.1)" : "none" }}>
