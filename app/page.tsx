@@ -160,8 +160,15 @@ export default function LandingPage() {
         .phone-image-wrapper { border-radius: 52px; overflow: hidden; position: relative; display: flex; justify-content: center; }
         h1, h2, h3 { text-wrap: balance; }
         .lp-hero-break { display: inline; }
+        .lp-phone-frame { --phone-scale: 0.85; }
         @media (max-width: 399px) {
           .lp-hero-break { display: none; }
+        }
+        @media (max-width: 344px) {
+          .lp-phone-frame { --phone-scale: 0.72; }
+        }
+        @media (max-width: 305px) {
+          .lp-phone-frame { --phone-scale: 0.65; }
         }
       `}</style>
 
@@ -197,7 +204,7 @@ export default function LandingPage() {
             </h1>
 
             <p style={{ fontSize: "1.05rem", color: C.inkMid, maxWidth: 540, lineHeight: 1.7, marginBottom: 40, animation: "fadeUp 0.8s 0.65s both" }}>
-              You notice the small changes: the missed dose, the rough night, the mood that&apos;s been off for two weeks. This is where those observations go.
+              You notice the small changes: the missed dose, the rough night, the mood that&apos;s been off for two weeks. This is where those observations&nbsp;go.
             </p>
 
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "flex-start", animation: "fadeUp 0.8s 0.8s both" }}>

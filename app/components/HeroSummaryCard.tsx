@@ -84,14 +84,23 @@ function StatusBar() {
  */
 export function HeroSummaryCard() {
   return (
-    <div aria-hidden="false" style={{ position: "relative", width: DESIGN_WIDTH * SCALE, height: SCREEN_HEIGHT * SCALE, margin: "0 auto" }}>
+    <div
+      aria-hidden="false"
+      className="lp-phone-frame"
+      style={{
+        position: "relative",
+        width: `calc(${DESIGN_WIDTH}px * var(--phone-scale, ${SCALE}))`,
+        height: `calc(${SCREEN_HEIGHT}px * var(--phone-scale, ${SCALE}))`,
+        margin: "0 auto",
+      }}
+    >
       <div
         style={{
           position: "absolute",
           top: 0,
           left: "50%",
           width: DESIGN_WIDTH + BEZEL * 2,
-          transform: `translateX(-50%) scale(${SCALE})`,
+          transform: "translateX(-50%) scale(var(--phone-scale, " + SCALE + "))",
           transformOrigin: "top center",
           background: COLORS.bezel,
           borderRadius: 44,
