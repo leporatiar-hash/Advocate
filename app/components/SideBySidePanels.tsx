@@ -136,23 +136,23 @@ export function BrowserFrame({ children }: { children: React.ReactNode }) {
 function MonitorFrame({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ width: "100%", maxWidth: 760, margin: "0 auto", filter: "drop-shadow(0 20px 40px rgba(15,23,42,0.12))" }}>
-      <div style={{ position: "relative", background: "#111418", borderRadius: 10, padding: 11 }}>
-        <span style={{ position: "absolute", top: 4, left: "50%", transform: "translateX(-50%)", width: 4, height: 4, borderRadius: "50%", background: "#565b58" }} />
+      <div style={{ position: "relative", background: "#111418", borderRadius: 10, padding: 14 }}>
+        <span style={{ position: "absolute", top: 5, left: "50%", transform: "translateX(-50%)", width: 5, height: 5, borderRadius: "50%", background: "#565b58" }} />
         <div style={{ background: C.white, borderRadius: 6, overflow: "hidden" }}>{children}</div>
       </div>
       <div
         style={{
-          width: "7%", minWidth: 18, maxWidth: 26, height: 34, margin: "0 auto",
-          background: "linear-gradient(180deg, #2a2e2b, #111418)",
-          clipPath: "polygon(28% 0%, 72% 0%, 100% 100%, 0% 100%)",
+          width: "9%", minWidth: 26, maxWidth: 42, height: 44, margin: "0 auto",
+          background: "linear-gradient(180deg, #d1d5db, #9ca3af)",
+          clipPath: "polygon(30% 0%, 70% 0%, 85% 100%, 15% 100%)",
         }}
       />
       <div
         style={{
-          width: "46%", minWidth: 120, maxWidth: 170, height: 10, margin: "0 auto",
-          borderRadius: 6,
-          background: "linear-gradient(180deg, #e5e5e3, #c9cbc7)",
-          boxShadow: "0 6px 12px rgba(15,23,42,0.15)",
+          width: "48%", minWidth: 140, maxWidth: 190, height: 14, margin: "0 auto",
+          borderRadius: 8,
+          background: "linear-gradient(180deg, #e5e7eb, #9ca3af)",
+          boxShadow: "0 4px 10px rgba(15,23,42,0.15)",
         }}
       />
     </div>
