@@ -138,6 +138,15 @@ export default function LandingPage() {
           .lp-sidebyside-grid { grid-template-columns: minmax(0, 1fr) !important; }
           .lp-clinician-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           .lp-clinician-cols { grid-template-columns: minmax(0, 1fr) !important; }
+          .lp-monitor-neck, .lp-monitor-base, .lp-monitor-camera { display: none !important; }
+          .lp-monitor-frame { filter: none !important; }
+          .lp-monitor-bezel {
+            background: ${C.white} !important;
+            padding: 0 !important;
+            border-radius: 12px !important;
+            border: 1px solid ${C.rule} !important;
+            box-shadow: 0 24px 60px rgba(26,36,32,0.12) !important;
+          }
           .lp-features-grid { grid-template-columns: 1fr !important; }
           .lp-featured-card { grid-column: span 1 !important; grid-template-columns: 1fr !important; }
           .lp-who-cards { grid-template-columns: 1fr !important; }

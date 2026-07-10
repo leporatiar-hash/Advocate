@@ -133,14 +133,20 @@ export function BrowserFrame({ children }: { children: React.ReactNode }) {
 // used only for the clinician portal mockup below. Bezel color matches
 // PhoneFrame's bezel so the two devices visually pair side by side. Stand and
 // base are what read as "desktop monitor" rather than a phone or tablet. ──
+// Desktop: monitor silhouette (bezel + camera + neck + base). The metaphor
+// only works at a landscape aspect ratio, so at mobile widths (where the
+// clinician content stacks into a tall single column) the bezel simplifies
+// into a plain bordered card and the neck/base/camera disappear entirely.
+// See the .lp-monitor-* overrides in page.tsx's mobile media query.
 function MonitorFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ width: "100%", maxWidth: 760, margin: "0 auto", filter: "drop-shadow(0 20px 40px rgba(15,23,42,0.12))" }}>
-      <div style={{ position: "relative", background: "#111418", borderRadius: 10, padding: 14 }}>
-        <span style={{ position: "absolute", top: 5, left: "50%", transform: "translateX(-50%)", width: 5, height: 5, borderRadius: "50%", background: "#565b58" }} />
+    <div className="lp-monitor-frame" style={{ width: "100%", maxWidth: 760, margin: "0 auto", filter: "drop-shadow(0 20px 40px rgba(15,23,42,0.12))" }}>
+      <div className="lp-monitor-bezel" style={{ position: "relative", background: "#111418", borderRadius: 10, padding: 14 }}>
+        <span className="lp-monitor-camera" style={{ position: "absolute", top: 5, left: "50%", transform: "translateX(-50%)", width: 5, height: 5, borderRadius: "50%", background: "#565b58" }} />
         <div style={{ background: C.white, borderRadius: 6, overflow: "hidden" }}>{children}</div>
       </div>
       <div
+        className="lp-monitor-neck"
         style={{
           width: "9%", minWidth: 26, maxWidth: 42, height: 44, margin: "0 auto",
           background: "linear-gradient(180deg, #d1d5db, #9ca3af)",
@@ -148,6 +154,7 @@ function MonitorFrame({ children }: { children: React.ReactNode }) {
         }}
       />
       <div
+        className="lp-monitor-base"
         style={{
           width: "48%", minWidth: 140, maxWidth: 190, height: 14, margin: "0 auto",
           borderRadius: 8,
