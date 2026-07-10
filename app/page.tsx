@@ -129,11 +129,15 @@ export default function LandingPage() {
         .lp-hero-copy { display: flex; flex-direction: column; align-items: flex-start; }
         .lp-hero-card-col { display: flex; justify-content: center; }
         .lp-hero-card-wrapper { width: 100%; max-width: 460px; }
-        .lp-sidebyside-grid { display: grid; grid-template-columns: 2fr 3fr; gap: 40px; }
+        .lp-sidebyside-grid { display: grid; grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.4fr); gap: 40px; }
+        .lp-clinician-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 6px; }
+        .lp-clinician-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px; }
         @media (max-width: 768px) {
           .lp-nav-links { display: none; }
           .lp-problem { grid-template-columns: 1fr !important; gap: 40px !important; }
-          .lp-sidebyside-grid { grid-template-columns: 1fr !important; }
+          .lp-sidebyside-grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .lp-clinician-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .lp-clinician-cols { grid-template-columns: minmax(0, 1fr) !important; }
           .lp-features-grid { grid-template-columns: 1fr !important; }
           .lp-featured-card { grid-column: span 1 !important; grid-template-columns: 1fr !important; }
           .lp-who-cards { grid-template-columns: 1fr !important; }
@@ -225,7 +229,7 @@ export default function LandingPage() {
             Logged at home. Ready for the appointment.
           </h2>
         </div>
-        <div className="lp-sidebyside-grid" style={{ maxWidth: 1040, margin: "0 auto" }}>
+        <div className="lp-sidebyside-grid" style={{ maxWidth: 1160, margin: "0 auto" }}>
           <div className="lp-reveal">
             <div style={{ fontSize: "0.75rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: C.sage, marginBottom: 16, textAlign: "center" }}>
               What the family logs

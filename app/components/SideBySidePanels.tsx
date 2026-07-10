@@ -129,24 +129,29 @@ export function BrowserFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Laptop frame: a new device chrome, distinct from PhoneFrame/BrowserFrame,
+// ── Monitor frame: a new device chrome, distinct from PhoneFrame/BrowserFrame,
 // used only for the clinician portal mockup below. Bezel color matches
-// PhoneFrame's bezel so the two devices visually pair side by side. ──
-function LaptopFrame({ children }: { children: React.ReactNode }) {
+// PhoneFrame's bezel so the two devices visually pair side by side. Stand and
+// base are what read as "desktop monitor" rather than a phone or tablet. ──
+function MonitorFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ width: "100%", maxWidth: 560, margin: "0 auto", filter: "drop-shadow(0 20px 40px rgba(15,23,42,0.12))" }}>
-      <div style={{ background: "#111418", borderRadius: "14px 14px 4px 4px", padding: "8px 9px 9px" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 5 }}>
-          <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#565b58" }} />
-        </div>
-        <div style={{ background: C.white, borderRadius: 8, overflow: "hidden" }}>{children}</div>
+    <div style={{ width: "100%", maxWidth: 760, margin: "0 auto", filter: "drop-shadow(0 20px 40px rgba(15,23,42,0.12))" }}>
+      <div style={{ position: "relative", background: "#111418", borderRadius: 10, padding: 11 }}>
+        <span style={{ position: "absolute", top: 4, left: "50%", transform: "translateX(-50%)", width: 4, height: 4, borderRadius: "50%", background: "#565b58" }} />
+        <div style={{ background: C.white, borderRadius: 6, overflow: "hidden" }}>{children}</div>
       </div>
       <div
         style={{
-          height: 12,
-          margin: "0 -7%",
+          width: "7%", minWidth: 18, maxWidth: 26, height: 34, margin: "0 auto",
+          background: "linear-gradient(180deg, #2a2e2b, #111418)",
+          clipPath: "polygon(28% 0%, 72% 0%, 100% 100%, 0% 100%)",
+        }}
+      />
+      <div
+        style={{
+          width: "46%", minWidth: 120, maxWidth: 170, height: 10, margin: "0 auto",
+          borderRadius: 6,
           background: "linear-gradient(180deg, #e5e5e3, #c9cbc7)",
-          borderRadius: "0 0 4px 4px",
           boxShadow: "0 6px 12px rgba(15,23,42,0.15)",
         }}
       />
@@ -156,19 +161,12 @@ function LaptopFrame({ children }: { children: React.ReactNode }) {
 
 function ClinicianChromeBar() {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", background: "#eef1ee", borderBottom: `1px solid ${C.rule}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ display: "flex", gap: 4 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#ec6a5e" }} />
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#f4bf4f" }} />
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#61c454" }} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, fontWeight: 600, color: C.inkMid }}>
-          <span style={{ width: 8, height: 8, borderRadius: 2, background: C.sage, display: "inline-block", flexShrink: 0 }} />
-          Advocate · Clinician View
-        </div>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#eef1ee", borderBottom: `1px solid ${C.rule}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: C.inkMid }}>
+        <span style={{ width: 9, height: 9, borderRadius: 2, background: C.sage, display: "inline-block", flexShrink: 0 }} />
+        Advocate · Clinician View
       </div>
-      <span style={{ fontSize: 7.5, fontWeight: 700, letterSpacing: "0.04em", color: C.inkSoft, background: C.white, border: `1px solid ${C.rule}`, padding: "2px 7px", borderRadius: 999, flexShrink: 0 }}>
+      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.04em", color: C.inkSoft, background: C.white, border: `1px solid ${C.rule}`, padding: "3px 8px", borderRadius: 999, flexShrink: 0 }}>
         READ-ONLY
       </span>
     </div>
@@ -192,8 +190,8 @@ const AdherenceIcon = () => (
 
 function StatCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string }) {
   return (
-    <div style={{ background: "#fbfbfa", border: `1px solid ${C.rule}`, borderRadius: 8, padding: "9px 10px 8px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+    <div style={{ background: "#fbfbfa", border: `1px solid ${C.rule}`, borderRadius: 8, padding: "7px 9px 6px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
         <div style={{ width: 13, height: 13, color: C.sage, flexShrink: 0 }}>{icon}</div>
         <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: C.inkSoft }}>{label}</div>
       </div>
@@ -213,11 +211,11 @@ const CORRELATION_DAYS = [
 
 function CorrelationStrip() {
   return (
-    <div style={{ marginTop: 8, background: "rgba(255,255,255,0.6)", border: "1px solid rgba(185,28,28,0.15)", borderRadius: 6, padding: "8px 10px 6px" }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: C.inkMid, marginBottom: 6 }}>
+    <div style={{ marginTop: 5, background: "rgba(255,255,255,0.6)", border: "1px solid rgba(185,28,28,0.15)", borderRadius: 6, padding: "5px 9px 4px" }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: C.inkMid, marginBottom: 4 }}>
         Last 14 days: morning Ativan dose vs. agitation severity
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 2, height: 26, marginBottom: 5 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 2, height: 19, marginBottom: 3 }}>
         {CORRELATION_DAYS.map((d, i) => (
           <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 3, flex: 1, height: "100%" }}>
             <div style={{ width: 5, borderRadius: "1px 1px 0 0", background: C.alert, height: d.sev * 0.55 }} />
@@ -229,7 +227,7 @@ function CorrelationStrip() {
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.inkSoft, marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: C.inkSoft, marginBottom: 5 }}>
         <span>Jun 25</span>
         <span>Jul 8</span>
       </div>
@@ -262,15 +260,15 @@ function PriorityFlag({
     positive: { bg: C.goodBg, accent: C.good, label: "POSITIVE" },
   }[level];
   return (
-    <div style={{ display: "flex", gap: 10, padding: "10px 10px 10px 9px", borderRadius: 8, borderLeft: `3px solid ${palette.accent}`, background: palette.bg, marginBottom: 6 }}>
+    <div style={{ display: "flex", gap: 10, padding: "9px 9px 9px 8px", borderRadius: 8, borderLeft: `3px solid ${palette.accent}`, background: palette.bg, marginBottom: 6 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
           <span style={{ fontSize: 15, fontWeight: 600, color: C.ink }}>{title}</span>
           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", padding: "3px 7px", borderRadius: 999, background: palette.accent, color: C.white, flexShrink: 0 }}>
             {palette.label}
           </span>
         </div>
-        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.4, color: C.inkMid }}>{sub}</p>
+        <p style={{ margin: 0, fontSize: 14, lineHeight: 1.35, color: C.inkMid }}>{sub}</p>
         {children}
       </div>
     </div>
@@ -318,10 +316,10 @@ const sectionLabelStyle: React.CSSProperties = {
 
 export function ClinicianViewPanel() {
   return (
-    <LaptopFrame>
+    <MonitorFrame>
       <ClinicianChromeBar />
-      <div style={{ padding: "13px 14px 14px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 8, paddingBottom: 9, borderBottom: `1px solid ${C.rule}`, marginBottom: 11 }}>
+      <div style={{ padding: "10px 16px 11px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 8, paddingBottom: 6, borderBottom: `1px solid ${C.rule}`, marginBottom: 8 }}>
           <div>
             <div style={{ fontFamily: "var(--font-lora), serif", fontSize: 18, fontWeight: 600, color: C.ink }}>Daniel M.</div>
             <div style={{ fontSize: 14, color: C.inkSoft, marginTop: 2 }}>Age 22 · Logged by primary caregiver (Mother)</div>
@@ -332,36 +330,35 @@ export function ClinicianViewPanel() {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 7, marginBottom: 12 }}>
+        <div className="lp-clinician-stats">
           <StatCard icon={<CalendarIcon />} label="Days Logged" value="26/30" sub="87% of days" />
           <StatCard icon={<AlertIcon />} label="Active Flags" value="3" sub="1 high priority" />
           <StatCard icon={<MoonIcon />} label="Avg Sleep" value="5.8 hrs" sub="down from 6.6 hrs" />
           <StatCard icon={<AdherenceIcon />} label="Med Adherence" value="88%" sub="combined, 2 meds" />
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <p style={sectionLabelStyle}>Key Observations, Ranked by Priority</p>
-          <PriorityFlag level="high" title="Agitation spikes align with missed Ativan doses" sub="8 of 9 agitation spikes in the past 30 days followed a missed morning dose within 24 hours.">
-            <CorrelationStrip />
-          </PriorityFlag>
-          <p style={{ margin: "6px 0 0", fontSize: 13, color: C.inkSoft }}>+2 more observations flagged for this visit.</p>
+        <p style={{ margin: "0 0 6px", fontSize: 13, color: C.inkSoft }}>+2 more observations flagged for this visit.</p>
+
+        <div className="lp-clinician-cols">
+          <div>
+            <p style={sectionLabelStyle}>Key Observations, Ranked by Priority</p>
+            <PriorityFlag level="high" title="Agitation spikes align with missed Ativan doses" sub="8 of 9 agitation spikes in the past 30 days followed a missed morning dose within 24 hours.">
+              <CorrelationStrip />
+            </PriorityFlag>
+          </div>
+          <div>
+            <p style={sectionLabelStyle}>Medication Adherence</p>
+            <BarRow label="Clozapine" sub="200mg, daily" pct={91} value="91%" color={C.sage} />
+            <BarRow label="Ativan" sub="1mg, PRN" pct={84} value="84%" color={C.watch} />
+            <p style={{ ...sectionLabelStyle, marginTop: 10 }}>Recent Caregiver Notes</p>
+            <NoteRow badge="MEDICATION" badgeColor={C.watch} badgeBg={C.watchBg} date="Jul 4" text="Skipped the morning Ativan today. Said he felt fine, but he was on edge by afternoon." />
+          </div>
         </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <p style={sectionLabelStyle}>Medication Adherence</p>
-          <BarRow label="Clozapine" sub="200mg, daily" pct={91} value="91%" color={C.sage} />
-          <BarRow label="Ativan" sub="1mg, PRN" pct={84} value="84%" color={C.watch} />
-        </div>
-
-        <div style={{ marginBottom: 11 }}>
-          <p style={sectionLabelStyle}>Recent Caregiver Notes</p>
-          <NoteRow badge="MEDICATION" badgeColor={C.watch} badgeBg={C.watchBg} date="Jul 4" text="Skipped the morning Ativan today. Said he felt fine, but he was on edge by afternoon." />
-        </div>
-
-        <p style={{ margin: 0, textAlign: "center", fontSize: 10.5, color: C.inkSoft, paddingTop: 8, borderTop: `1px solid ${C.rule}` }}>
+        <p style={{ margin: "8px 0 0", textAlign: "center", fontSize: 10.5, color: C.inkSoft, paddingTop: 6, borderTop: `1px solid ${C.rule}` }}>
           Generated by Advocate from caregiver-logged observations. Not a diagnostic tool.
         </p>
       </div>
-    </LaptopFrame>
+    </MonitorFrame>
   );
 }
