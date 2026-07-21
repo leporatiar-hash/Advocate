@@ -192,6 +192,14 @@ export interface MedicationSideEffectSummary {
   clinical_note: string;
 }
 
+export interface ReviewableFact {
+  type: string;
+  medication_id: number;
+  medication_name: string;
+  date: string;
+  label: string;
+}
+
 export interface SummaryResponse {
   executive_summary: string;
   adherence: AdherenceItem[];
@@ -201,6 +209,7 @@ export interface SummaryResponse {
   discussion_items: string[];
   adherence_data?: Record<string, { name: string; percentage: number; days_taken: number; days_logged: number }>;
   assessment_data?: Record<string, AssessmentDataEntry>;
+  reviewable_facts?: ReviewableFact[];
 }
 
 export type InstrumentKey = "lawton_iadl" | "phq9" | "csi";

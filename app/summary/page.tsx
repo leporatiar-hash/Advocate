@@ -7,7 +7,7 @@ import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
-import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary, AssessmentDataEntry } from "../lib/types";
+import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary, AssessmentDataEntry, ReviewableFact } from "../lib/types";
 
 const PRINT_STYLE = `
 @media print {
@@ -246,6 +246,79 @@ function AssessmentScoresCard({ data }: { data: Record<string, AssessmentDataEnt
   );
 }
 
+// ── Review facts ──────────────────────────────────────────────────────────────
+
+function formatShortDate(dateStr: string): string {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" });
+}
+
+function ReviewFacts({
+  facts, confirmKey, updatedKeys, correctingKey, onRequestConfirm, onCancelConfirm, onConfirm,
+}: {
+  facts: ReviewableFact[];
+  confirmKey: string | null;
+  updatedKeys: Set<string>;
+  correctingKey: string | null;
+  onRequestConfirm: (key: string) => void;
+  onCancelConfirm: () => void;
+  onConfirm: (fact: ReviewableFact) => void;
+}) {
+  if (facts.length === 0) {
+    return <p className="text-sm text-slate-400 pt-2">No flagged facts to review.</p>;
+  }
+  return (
+    <div className="space-y-3 pt-1">
+      {facts.map((fact) => {
+        const key = `${fact.medication_id}-${fact.date}`;
+        const isConfirming = confirmKey === key;
+        const isUpdated = updatedKeys.has(key);
+        const isCorrecting = correctingKey === key;
+        return (
+          <div key={key}>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-slate-700 flex-1">{fact.label}</p>
+              {isUpdated ? (
+                <span className="text-sm font-semibold whitespace-nowrap" style={{ color: "#16A34A" }}>Updated</span>
+              ) : !isConfirming ? (
+                <button
+                  onClick={() => onRequestConfirm(key)}
+                  className="text-sm font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
+                  style={{ background: "#f2f7f3", color: "#4a7c59" }}
+                >
+                  He took it
+                </button>
+              ) : null}
+            </div>
+            {isConfirming && (
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-xl px-3 py-2" style={{ background: "#f8fafc" }}>
+                <p className="text-sm text-slate-600">Mark {formatShortDate(fact.date)} as taken?</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={onCancelConfirm}
+                    disabled={isCorrecting}
+                    className="text-sm font-semibold px-3 py-1.5 rounded-lg"
+                    style={{ background: "#f1f5f9", color: "#475569" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => onConfirm(fact)}
+                    disabled={isCorrecting}
+                    className="text-sm font-semibold px-3 py-1.5 rounded-lg text-white"
+                    style={{ background: "#4a7c59" }}
+                  >
+                    Yes
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Summary title helpers ──────────────────────────────────────────────────────
 
 function formatSummaryTitle(startStr: string, endStr: string): string {
@@ -290,6 +363,10 @@ export default function SummaryPage() {
   const [customTo, setCustomTo] = useState(() => localDateStr(new Date()));
   const [summaryDateRange, setSummaryDateRange] = useState<{ startDate: string; endDate: string } | null>(null);
   const [loaderDone, setLoaderDone] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [confirmFactKey, setConfirmFactKey] = useState<string | null>(null);
+  const [updatedFactKeys, setUpdatedFactKeys] = useState<Set<string>>(new Set());
+  const [correctingFactKey, setCorrectingFactKey] = useState<string | null>(null);
 
   const { user } = useAuth();
 
@@ -351,6 +428,25 @@ export default function SummaryPage() {
 
   function handleClear() {
     setSummary(null);
+  }
+
+  async function handleCorrectFact(fact: ReviewableFact) {
+    if (!patient) return;
+    const key = `${fact.medication_id}-${fact.date}`;
+    setCorrectingFactKey(key);
+    try {
+      await api.correctMedicationTaken(patient.id, fact.date, fact.medication_id);
+      setConfirmFactKey(null);
+      setUpdatedFactKeys((prev) => new Set(prev).add(key));
+      const range = summaryDateRange ?? getDateRange();
+      const result = await api.generateSummary(patient.id, range.startDate, range.endDate) as SummaryResponse;
+      setSummary(result);
+      setIsSaved(false);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update");
+    } finally {
+      setCorrectingFactKey(null);
+    }
   }
 
   async function handleSave() {
@@ -600,6 +696,33 @@ export default function SummaryPage() {
             {/* Print footer — hidden on screen, shown when printing */}
             <div className="print-footer" style={{ display: "none" }}>
               Generated by Advocate · Caregiver Health Tracking · {today}
+            </div>
+
+            {/* Something look wrong? review */}
+            <div className="no-print bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-base font-semibold text-navy">Something look wrong?</p>
+                <button
+                  onClick={() => setReviewOpen((o) => !o)}
+                  className="text-sm font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
+                  style={{ background: "#f2f7f3", color: "#4a7c59" }}
+                >
+                  {reviewOpen ? "Hide" : "Review"}
+                </button>
+              </div>
+              {reviewOpen && (
+                <div className="pt-1 border-t border-slate-100">
+                  <ReviewFacts
+                    facts={summary.reviewable_facts ?? []}
+                    confirmKey={confirmFactKey}
+                    updatedKeys={updatedFactKeys}
+                    correctingKey={correctingFactKey}
+                    onRequestConfirm={setConfirmFactKey}
+                    onCancelConfirm={() => setConfirmFactKey(null)}
+                    onConfirm={handleCorrectFact}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Save + Regenerate row */}

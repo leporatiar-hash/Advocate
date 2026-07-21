@@ -141,6 +141,11 @@ export const api = {
   getMissedDays: (patientId: number) => request(`/logs/${patientId}/missed-days`),
   quickLog: (patientId: number, date: string, type: string, note?: string) =>
     request(`/logs/${patientId}/quick`, { method: "POST", body: JSON.stringify({ date, type, note }) }),
+  correctMedicationTaken: (patientId: number, date: string, medicationId: number) =>
+    request(`/logs/${patientId}/date/${date}/medication-taken`, {
+      method: "PATCH",
+      body: JSON.stringify({ medication_id: medicationId }),
+    }),
 
   // User config
   updateUserConfig: (updates: object) =>

@@ -77,7 +77,7 @@ def _build_assessment_data(patient_id: int, start_date, end_date, db: Session) -
 
 def _calculate_adherence(logs, medications):
     med_stats = {
-        med.id: {"name": med.name, "taken": 0, "total": 0}
+        med.id: {"name": med.name, "taken": 0, "total": 0, "missed_dates": []}
         for med in medications
     }
     for log in logs:
@@ -89,15 +89,37 @@ def _calculate_adherence(logs, medications):
                 med_stats[mid]["total"] += 1
                 if entry.get("taken"):
                     med_stats[mid]["taken"] += 1
+                else:
+                    med_stats[mid]["missed_dates"].append(log.date.isoformat())
     return {
         mid: {
             "name": data["name"],
             "percentage": round(data["taken"] / data["total"] * 100, 1) if data["total"] else 0,
             "days_taken": data["taken"],
             "days_logged": data["total"],
+            "missed_dates": data["missed_dates"],
         }
         for mid, data in med_stats.items()
     }
+
+
+def _build_reviewable_facts(patient_name: str, adherence: dict) -> list:
+    """Correctable facts for the "Something look wrong?" review list. v1 only
+    covers medication adherence misses, derived from the same adherence
+    aggregation above so there is a single source of truth for miss dates."""
+    facts = []
+    for mid, data in adherence.items():
+        for d in data["missed_dates"]:
+            date_label = date_type.fromisoformat(d).strftime("%B %-d")
+            facts.append({
+                "type": "medication_adherence",
+                "medication_id": mid,
+                "medication_name": data["name"],
+                "date": d,
+                "label": f"{patient_name} missed a dose of {data['name']} on {date_label}",
+            })
+    facts.sort(key=lambda f: (f["date"], f["medication_name"]))
+    return facts
 
 
 @router.post("/{patient_id}")
@@ -146,6 +168,7 @@ def generate_summary(
             "lifestyle_notes": [],
             "discussion_items": [],
             "adherence_data": {},
+            "reviewable_facts": [],
         }
         assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
         if assessment_data:
@@ -460,6 +483,7 @@ Please generate a summary as JSON with exactly these fields:
     summary_data["adherence_data"] = {
         str(mid): d for mid, d in adherence.items()
     }
+    summary_data["reviewable_facts"] = _build_reviewable_facts(patient.name, adherence)
 
     assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
     if assessment_data:

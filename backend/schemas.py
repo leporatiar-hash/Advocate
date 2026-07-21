@@ -149,6 +149,10 @@ class QuickLogRequest(BaseModel):
     note: Optional[str] = None  # used when type == "catch_up_note"
 
 
+class MedicationTakenCorrection(BaseModel):
+    medication_id: int
+
+
 class MedicationTaken(BaseModel):
     medication_id: int
     taken: bool

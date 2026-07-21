@@ -285,6 +285,53 @@ def quick_log(
     return log
 
 
+@router.patch("/{patient_id}/date/{date_str}/medication-taken")
+def correct_medication_taken(
+    patient_id: int,
+    date_str: str,
+    body: schemas.MedicationTakenCorrection,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Marks a single medication as taken for one day, without touching any
+    other field on that day's log. Used by the summary page's "Something look
+    wrong?" review flow to correct a mis-logged missed dose."""
+    _verify_patient(patient_id, current_user, db)
+
+    try:
+        target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    log = (
+        db.query(models.DailyLog)
+        .filter(
+            models.DailyLog.patient_id == patient_id,
+            models.DailyLog.date == target_date,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(status_code=404, detail="No log found for that date")
+
+    entries = log.medications_taken or []
+    updated_entries = []
+    found = False
+    for entry in entries:
+        if entry.get("medication_id") == body.medication_id:
+            updated_entries.append({**entry, "taken": True})
+            found = True
+        else:
+            updated_entries.append(entry)
+
+    if not found:
+        raise HTTPException(status_code=404, detail="No matching medication entry for that date")
+
+    log.medications_taken = updated_entries
+    db.commit()
+    return {"success": True}
+
+
 @router.get("/{patient_id}", response_model=List[schemas.DailyLogResponse])
 def get_logs(
     patient_id: int,
