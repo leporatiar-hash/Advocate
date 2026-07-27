@@ -3,6 +3,7 @@ from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Cookie, Depends, Header, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 import os
 from dotenv import load_dotenv
@@ -63,7 +64,7 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    user = db.query(models.User).filter(models.User.email == email).first()
+    user = db.query(models.User).filter(func.lower(models.User.email) == email.strip().lower()).first()
     if user is None:
         raise credentials_exception
     return user

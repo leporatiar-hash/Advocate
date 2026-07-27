@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import resend
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -51,12 +52,13 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 @router.post("/register", response_model=schemas.AuthResponse)
 def register(user_data: schemas.UserCreate, response: Response, db: Session = Depends(get_db)):
-    existing = db.query(models.User).filter(models.User.email == user_data.email).first()
+    email = user_data.email.strip().lower()
+    existing = db.query(models.User).filter(func.lower(models.User.email) == email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = models.User(
-        email=user_data.email,
+        email=email,
         password_hash=get_password_hash(user_data.password),
         name=user_data.name,
         role=user_data.role.value,
@@ -72,7 +74,8 @@ def register(user_data: schemas.UserCreate, response: Response, db: Session = De
 
 @router.post("/login", response_model=schemas.AuthResponse)
 def login(credentials: schemas.UserLogin, response: Response, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == credentials.email).first()
+    email = credentials.email.strip().lower()
+    user = db.query(models.User).filter(func.lower(models.User.email) == email).first()
     if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,11 +100,13 @@ def me(current_user: models.User = Depends(get_current_user)):
 
 @router.post("/forgot-password")
 def forgot_password(body: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    email = body.email.strip().lower()
+
     # Rate limit silently — always return 200 to avoid leaking info
-    if not _rate_limit_ok(body.email.lower()):
+    if not _rate_limit_ok(email):
         return {"message": "If that email is registered, a reset link has been sent."}
 
-    user = db.query(models.User).filter(models.User.email == body.email).first()
+    user = db.query(models.User).filter(func.lower(models.User.email) == email).first()
     if not user:
         return {"message": "If that email is registered, a reset link has been sent."}
 
