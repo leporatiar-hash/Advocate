@@ -29,7 +29,7 @@ export default function LoginPage() {
     try {
       const res = await api.login({ email, password }) as AuthResponse;
       login(res.user, res.access_token);
-      router.push("/dashboard");
+      router.push(res.user.role === "clinician" ? "/clinician" : "/dashboard");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {

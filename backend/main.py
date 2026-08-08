@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from database import engine, Base
 import models  # noqa: F401 — ensures models are registered before create_all
-from routers import auth, patients, medications, logs, summary, onboarding, saved_summaries, social_contacts, assessments
+from routers import auth, patients, medications, logs, summary, onboarding, saved_summaries, social_contacts, assessments, clinicians
 
 load_dotenv()
 
@@ -30,6 +30,7 @@ _MIGRATIONS = [
     "ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS therapies JSONB",
     "ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS clinicians JSONB",
     "ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS log_type VARCHAR DEFAULT 'detailed'",
+    "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'clinician'",
 ]
 
 _SEED_DEFAULT_CONTACTS = """
@@ -133,6 +134,7 @@ app.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 app.include_router(saved_summaries.router, prefix="/summaries", tags=["summaries"])
 app.include_router(social_contacts.router, prefix="/api/social-contacts", tags=["social-contacts"])
 app.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
+app.include_router(clinicians.router, prefix="/clinicians", tags=["clinicians"])
 
 
 @app.get("/")

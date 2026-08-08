@@ -52,6 +52,9 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 @router.post("/register", response_model=schemas.AuthResponse)
 def register(user_data: schemas.UserCreate, response: Response, db: Session = Depends(get_db)):
+    if user_data.role == schemas.UserRole.clinician:
+        raise HTTPException(status_code=403, detail="Clinician accounts cannot self-register")
+
     email = user_data.email.strip().lower()
     existing = db.query(models.User).filter(func.lower(models.User.email) == email).first()
     if existing:

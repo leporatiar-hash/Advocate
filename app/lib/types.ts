@@ -2,7 +2,7 @@ export interface User {
   id: number;
   email: string;
   name: string;
-  role: "caregiver" | "patient";
+  role: "caregiver" | "patient" | "clinician";
   created_at: string;
   user_config: DashboardConfig | null;
 }
@@ -84,6 +84,7 @@ export interface MedicationTaken {
   medication_id: number;
   taken: boolean;
   time_taken: string | null; // "HH:MM"
+  medication_name?: string; // present on clinician drill-down responses, resolved server-side
 }
 
 export interface Symptom {
@@ -266,6 +267,61 @@ export interface AssessmentDataEntry {
   scores: AssessmentScoreEntry[];
   latest: number;
   delta: number | null;
+}
+
+// ── Clinician Portal ────────────────────────────────────────────────────────
+
+export interface ClinicianPatientSummary {
+  id: number;
+  name: string;
+}
+
+export interface PortalWindow {
+  days: number;
+  start: string;
+  end: string;
+}
+
+export interface PortalStats {
+  log_frequency: { days_logged: number; days_in_window: number; pct: number };
+  symptom_load: { avg_severity: number | null; distinct_symptoms: number };
+  avg_sleep: { hours: number | null };
+  med_adherence: { pct: number };
+}
+
+export interface PortalFlag {
+  severity: "high" | "moderate" | "low";
+  metric: string;
+  text: string;
+}
+
+export interface SymptomFrequencyEntry {
+  symptom: string;
+  days_present: number;
+  avg_severity: number | null;
+}
+
+export interface MedAdherenceEntry {
+  medication: string;
+  taken: number;
+  expected: number;
+  pct: number;
+}
+
+export interface RecentNote {
+  date: string;
+  text: string;
+  badges: string[];
+}
+
+export interface ClinicianPortalResponse {
+  window: PortalWindow;
+  patient: { name: string; age: number | null; active_medications: string[] };
+  stats: PortalStats;
+  flags: PortalFlag[];
+  symptom_frequency: SymptomFrequencyEntry[];
+  med_adherence: MedAdherenceEntry[];
+  recent_notes: RecentNote[];
 }
 
 export interface SavedSummary {

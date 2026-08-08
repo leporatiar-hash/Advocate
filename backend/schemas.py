@@ -7,6 +7,7 @@ from enum import Enum
 class UserRole(str, Enum):
     caregiver = "caregiver"
     patient = "patient"
+    clinician = "clinician"
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -324,6 +325,86 @@ class AssessmentResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Clinician Portal ──────────────────────────────────────────────────────────
+
+class ClinicianPatientSummary(BaseModel):
+    id: int
+    name: str
+
+
+class PortalWindow(BaseModel):
+    days: int
+    start: date
+    end: date
+
+
+class PortalPatient(BaseModel):
+    name: str
+    age: Optional[int] = None
+    active_medications: List[str]
+
+
+class LogFrequencyStat(BaseModel):
+    days_logged: int
+    days_in_window: int
+    pct: float
+
+
+class SymptomLoadStat(BaseModel):
+    avg_severity: Optional[float] = None
+    distinct_symptoms: int
+
+
+class AvgSleepStat(BaseModel):
+    hours: Optional[float] = None
+
+
+class MedAdherenceStat(BaseModel):
+    pct: float
+
+
+class PortalStats(BaseModel):
+    log_frequency: LogFrequencyStat
+    symptom_load: SymptomLoadStat
+    avg_sleep: AvgSleepStat
+    med_adherence: MedAdherenceStat
+
+
+class PortalFlag(BaseModel):
+    severity: str  # "high" | "moderate" | "low"
+    metric: str
+    text: str
+
+
+class SymptomFrequencyEntry(BaseModel):
+    symptom: str
+    days_present: int
+    avg_severity: Optional[float] = None
+
+
+class MedAdherenceEntry(BaseModel):
+    medication: str
+    taken: int
+    expected: int
+    pct: float
+
+
+class RecentNote(BaseModel):
+    date: date
+    text: str
+    badges: List[str]
+
+
+class ClinicianPortalResponse(BaseModel):
+    window: PortalWindow
+    patient: PortalPatient
+    stats: PortalStats
+    flags: List[PortalFlag]
+    symptom_frequency: List[SymptomFrequencyEntry]
+    med_adherence: List[MedAdherenceEntry]
+    recent_notes: List[RecentNote]
 
 
 # ── Saved Summaries ───────────────────────────────────────────────────────────

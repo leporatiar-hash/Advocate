@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta, date as date_type
+from datetime import datetime, date as date_type
 from typing import Optional
 from collections import defaultdict
 import json
@@ -13,6 +13,7 @@ import models
 from auth import get_current_user
 from routers.medications import lookup_known_side_effects
 from instruments import INSTRUMENTS
+from services.aggregation import build_patient_aggregate
 
 load_dotenv()
 
@@ -75,34 +76,6 @@ def _build_assessment_data(patient_id: int, start_date, end_date, db: Session) -
     return assessment_data
 
 
-def _calculate_adherence(logs, medications):
-    med_stats = {
-        med.id: {"name": med.name, "taken": 0, "total": 0, "missed_dates": []}
-        for med in medications
-    }
-    for log in logs:
-        if not log.medications_taken:
-            continue
-        for entry in log.medications_taken:
-            mid = entry.get("medication_id")
-            if mid in med_stats:
-                med_stats[mid]["total"] += 1
-                if entry.get("taken"):
-                    med_stats[mid]["taken"] += 1
-                else:
-                    med_stats[mid]["missed_dates"].append(log.date.isoformat())
-    return {
-        mid: {
-            "name": data["name"],
-            "percentage": round(data["taken"] / data["total"] * 100, 1) if data["total"] else 0,
-            "days_taken": data["taken"],
-            "days_logged": data["total"],
-            "missed_dates": data["missed_dates"],
-        }
-        for mid, data in med_stats.items()
-    }
-
-
 def _build_reviewable_facts(patient_name: str, adherence: dict) -> list:
     """Correctable facts for the "Something look wrong?" review list. v1 only
     covers medication adherence misses, derived from the same adherence
@@ -141,24 +114,11 @@ def generate_summary(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    today = datetime.now().date()
-    if start_date is None:
-        start_date = today - timedelta(days=30)
-    if end_date is None:
-        end_date = today
-
-    logs = (
-        db.query(models.DailyLog)
-        .filter(
-            models.DailyLog.patient_id == patient_id,
-            models.DailyLog.date >= start_date,
-            models.DailyLog.date <= end_date,
-        )
-        .order_by(models.DailyLog.date.asc())
-        .all()
-    )
-
-    date_range_days = (end_date - start_date).days + 1
+    agg = build_patient_aggregate(patient_id, db=db, start_date=start_date, end_date=end_date)
+    start_date = agg["window"]["start"]
+    end_date = agg["window"]["end"]
+    date_range_days = agg["window"]["days"]
+    logs = agg["logs"]
 
     if not logs:
         no_log_summary = {
@@ -175,16 +135,8 @@ def generate_summary(
             no_log_summary["assessment_data"] = assessment_data
         return no_log_summary
 
-    medications = (
-        db.query(models.Medication)
-        .filter(
-            models.Medication.patient_id == patient_id,
-            models.Medication.active == True,
-        )
-        .all()
-    )
-
-    adherence = _calculate_adherence(logs, medications)
+    medications = agg["medications"]
+    adherence = agg["adherence"]
 
     # Read condition context and summary style from user config
     user_config = current_user.user_config or {}
@@ -201,79 +153,18 @@ def generate_summary(
         .first()
     )
 
-    # Aggregate statistics
-    sleep_vals, mood_vals, water_vals = [], [], []
-    symptom_counts: dict = defaultdict(lambda: {"severe": 0, "moderate": 0, "none": 0})
-    activity_counts = defaultdict(int)
-    side_effect_counts = defaultdict(lambda: defaultdict(int))
-    lifestyle_totals = defaultdict(int)
-    log_entries = []
-
-    HYDRATION_LABELS = {80: "Good", 48: "Fair", 24: "Poor"}
-
-    for log in logs:
-        if log.sleep_hours is not None:
-            sleep_vals.append(log.sleep_hours)
-        if log.mood_score is not None:
-            mood_vals.append(log.mood_score)
-        if log.water_intake_oz is not None:
-            water_vals.append(log.water_intake_oz)
-
-        for s in (log.symptoms or []):
-            name = s["name"]
-            sev = s.get("severity")
-            if sev is None:
-                continue
-            if sev >= 8:
-                symptom_counts[name]["severe"] += 1
-            elif sev >= 5:
-                symptom_counts[name]["moderate"] += 1
-            else:
-                symptom_counts[name]["none"] += 1
-
-        for a in (log.activities or []):
-            activity_counts[a["type"]] += 1
-
-        for med_se in (log.medication_side_effects or []):
-            for se in med_se.get("side_effects", []):
-                side_effect_counts[med_se["medication_name"]][se["name"]] += 1
-
-        if log.lifestyle:
-            for k, v in log.lifestyle.items():
-                if v:
-                    lifestyle_totals[k] += 1
-
-        water_label = HYDRATION_LABELS.get(log.water_intake_oz) if log.water_intake_oz is not None else None
-        log_entries.append({
-            "date": log.date.isoformat(),
-            "mood": log.mood_score,
-            "sleep_hours": log.sleep_hours,
-            "hydration": water_label or (f"{log.water_intake_oz}oz" if log.water_intake_oz is not None else None),
-            "symptoms": log.symptoms,
-            "activities": log.activities,
-            "lifestyle": log.lifestyle,
-            "medications_taken": log.medications_taken,
-            "medication_side_effects": log.medication_side_effects,
-            "notes": log.notes,
-        })
-
-    avg_sleep = round(sum(sleep_vals) / len(sleep_vals), 1) if sleep_vals else None
-    avg_mood = round(sum(mood_vals) / len(mood_vals), 1) if mood_vals else None
-
-    # Hydration summary
-    hydration_counts: dict = defaultdict(int)
-    for v in water_vals:
-        label = HYDRATION_LABELS.get(v, "other")
-        hydration_counts[label] += 1
-
-    # Precompute for JSON serialisation (defaultdicts aren't directly serialisable)
-    side_effects_serializable = {k: dict(v) for k, v in side_effect_counts.items()}
+    # Aggregate statistics (computed once in build_patient_aggregate above)
+    avg_sleep = agg["avg_sleep"]
+    avg_mood = agg["avg_mood"]
+    hydration_counts = agg["hydration_counts"]
+    side_effects_serializable = agg["side_effect_counts"]
+    log_entries = agg["log_entries"]
+    total_logs = agg["total_logs"]
 
     # Build symptom tracking text
-    total_logs = len(logs)
     symptom_lines = []
-    for name, counts in symptom_counts.items():
-        logged_days = counts["severe"] + counts["moderate"] + counts["none"]
+    for name, counts in agg["symptom_stats"].items():
+        logged_days = counts["days_present"]
         not_logged = total_logs - logged_days
         symptom_lines.append(
             f"  - {name}: {counts['severe']} Severe days, {counts['moderate']} Moderate days, "
@@ -382,10 +273,10 @@ SYMPTOM TRACKING (Severity on a 1–10 scale — out of {total_logs} logged days
 {symptom_tracking_text}
 
 ACTIVITY FREQUENCY (number of days each activity was logged):
-{json.dumps(dict(activity_counts), indent=2)}
+{json.dumps(agg["activity_counts"], indent=2)}
 
 LIFESTYLE FACTOR TOTALS (out of {total_logs} logged days):
-{json.dumps(dict(lifestyle_totals), indent=2)}
+{json.dumps(agg["lifestyle_totals"], indent=2)}
 
 MEDICATION SIDE EFFECT OCCURRENCES (medication → side effect → count):
 {json.dumps(side_effects_serializable, indent=2)}

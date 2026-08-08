@@ -186,6 +186,13 @@ export const api = {
     request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
   resetPassword: (token: string, new_password: string) =>
     request("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, new_password }) }),
+
+  // Clinician portal
+  getClinicianPatients: () => request("/clinicians/patients"),
+  getClinicianPortal: (patientId: number, windowDays = 30) =>
+    request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
+  getClinicianLog: (patientId: number, dateStr: string) =>
+    request(`/clinicians/patient/${patientId}/log/${dateStr}`),
 };
 
 // Utility: get local date string (YYYY-MM-DD) — avoids UTC offset shifting the date

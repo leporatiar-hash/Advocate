@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Text, JSON, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, Text, JSON, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -9,6 +9,7 @@ from database import Base
 class UserRole(str, enum.Enum):
     caregiver = "caregiver"
     patient = "patient"
+    clinician = "clinician"
 
 
 class User(Base):
@@ -178,6 +179,19 @@ class Assessment(Base):
 
     patient = relationship("Patient", foreign_keys=[patient_id])
     caregiver = relationship("User", foreign_keys=[caregiver_id])
+
+
+class ClinicianPatientLink(Base):
+    __tablename__ = "clinician_patient_links"
+    __table_args__ = (UniqueConstraint("clinician_id", "patient_id", name="uq_clinician_patient_link"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    clinician_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    clinician = relationship("User", foreign_keys=[clinician_id])
+    patient = relationship("Patient", foreign_keys=[patient_id])
 
 
 class SavedSummary(Base):

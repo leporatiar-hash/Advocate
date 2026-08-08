@@ -59,6 +59,29 @@ input[type="range"]::-moz-range-thumb {
   .print-container { padding: 0 !important; }
 }
 
+/* Clinician portal — scoped design tokens, separate from the caregiver app's
+   navy/sage theme above. Deep teal / amber / muted red per the Advocate
+   clinician spec; Inter with tabular figures for scannable numbers. */
+.clinician-portal {
+  --cp-teal: #0F6B66;
+  --cp-teal-light: #E6F1F0;
+  --cp-amber: #D97706;
+  --cp-amber-light: #FEF3C7;
+  --cp-red: #B91C1C;
+  --cp-red-light: #FEE2E2;
+  --cp-text: #374151;
+  --cp-text-muted: #6B7280;
+  --cp-bg: #FAFAF7;
+  --cp-border: #E5E7EB;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  min-height: 100vh;
+}
+.clinician-portal .cp-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
 /* NProgress route transition bar — must be after nprogress.css in bundle */
 #nprogress .bar {
   background: var(--color-teal);
