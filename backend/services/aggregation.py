@@ -9,6 +9,32 @@ import models
 # Exact-match preset buttons the log UI writes (80/48/24oz), not a continuous scale.
 HYDRATION_LABELS = {80: "Good", 48: "Fair", 24: "Poor"}
 
+# Below this many logged nights, an average-sleep number is a coin flip, not a
+# clinical signal — the UI must say so instead of presenting it with false confidence.
+SLEEP_DATA_FLOOR = 5
+
+# An ordinary symptom needs to show up more than once to be a pattern rather than a
+# single bad day. Safety-relevant symptoms are exempt — see _is_safety_symptom.
+SYMPTOM_FLAG_MIN_DAYS = 3
+
+# Symptom names that must surface on a single occurrence, severity and frequency
+# gates notwithstanding. A lone mention of self-harm or command hallucinations is
+# never "infrequent" — presence alone is the signal. Matched as a substring,
+# case-insensitively, against whatever symptom name the caregiver's config uses.
+SAFETY_SYMPTOM_KEYWORDS = (
+    "suicid",
+    "self-harm",
+    "self harm",
+    "homicid",
+    "command hallucination",
+    "harm to others",
+)
+
+
+def _is_safety_symptom(name: str) -> bool:
+    lowered = name.lower()
+    return any(kw in lowered for kw in SAFETY_SYMPTOM_KEYWORDS)
+
 
 def _calculate_adherence(logs, medications) -> dict:
     med_stats = {
@@ -36,6 +62,33 @@ def _calculate_adherence(logs, medications) -> dict:
         }
         for mid, data in med_stats.items()
     }
+
+
+def group_observation_periods(logs) -> list:
+    """Collapse consecutive `same_as_yesterday` entries into the single real
+    observation they represent. The caregiver's "same as yesterday" quick-log
+    copies the prior day's entire entry verbatim, notes included — it is a
+    reaffirmation, not a new observation. Anything downstream that reasons about
+    how many times something was actually reported (note counts, the clinical
+    synthesis) must treat a repeated run as ONE data point, not one per day, or it
+    will triple-weight a single account. `logs` must be date-ascending, matching
+    what build_patient_aggregate queries.
+    """
+    groups: list = []
+    for log in logs:
+        if log.log_type == "same_as_yesterday" and groups:
+            groups[-1]["repeated_dates"].append(log.date)
+            continue
+        groups.append({
+            "date": log.date,
+            "notes": log.notes,
+            "episode": log.episode,
+            "symptoms": log.symptoms,
+            "medications_taken": log.medications_taken,
+            "log_type": log.log_type,
+            "repeated_dates": [],
+        })
+    return groups
 
 
 def build_patient_aggregate(
@@ -181,6 +234,7 @@ def build_patient_aggregate(
         "side_effect_counts": {k: dict(v) for k, v in side_effect_counts.items()},
         "lifestyle_totals": dict(lifestyle_totals),
         "log_entries": log_entries,
+        "observation_periods": group_observation_periods(logs),
     }
 
 
@@ -195,12 +249,19 @@ def build_flags(agg: dict) -> list:
         avg = stat["avg_severity"]
         if avg is None:
             continue
-        if avg >= 8:
+        is_safety = _is_safety_symptom(name)
+        if is_safety:
+            # Presence alone is the signal — never gated on frequency or severity.
             severity = "high"
-        elif avg >= 5:
-            severity = "moderate"
         else:
-            continue
+            if stat["days_present"] < SYMPTOM_FLAG_MIN_DAYS:
+                continue
+            if avg >= 8:
+                severity = "high"
+            elif avg >= 5:
+                severity = "moderate"
+            else:
+                continue
         flags.append({
             "severity": severity,
             "metric": "symptom",
@@ -226,7 +287,7 @@ def build_flags(agg: dict) -> list:
             })
 
     avg_sleep = agg["avg_sleep"]
-    if avg_sleep is not None:
+    if avg_sleep is not None and len(agg["sleep_vals"]) >= SLEEP_DATA_FLOOR:
         if avg_sleep < 5:
             flags.append({
                 "severity": "high",

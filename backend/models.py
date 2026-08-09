@@ -194,6 +194,25 @@ class ClinicianPatientLink(Base):
     patient = relationship("Patient", foreign_keys=[patient_id])
 
 
+class ClinicianNoteSynthesis(Base):
+    """Cached AI synthesis of a patient's caregiver notes for the clinician portal's
+    Clinical Summary. Generated only by the explicit scripts/generate_synthesis.py
+    script, never by the portal's GET path — one row per patient, overwritten on
+    each regeneration, so the page render is always a cache read, never an OpenAI
+    call."""
+    __tablename__ = "clinician_note_synthesis"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id"), unique=True, nullable=False)
+    window_days = Column(Integer, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    content = Column(JSON, nullable=False)
+
+    patient = relationship("Patient", foreign_keys=[patient_id])
+
+
 class SavedSummary(Base):
     __tablename__ = "saved_summaries"
 

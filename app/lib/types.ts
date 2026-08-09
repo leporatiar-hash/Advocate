@@ -285,7 +285,7 @@ export interface PortalWindow {
 export interface PortalStats {
   log_frequency: { days_logged: number; days_in_window: number; pct: number };
   symptom_load: { avg_severity: number | null; distinct_symptoms: number };
-  avg_sleep: { hours: number | null };
+  avg_sleep: { hours: number | null; days_logged: number };
   med_adherence: { pct: number };
 }
 
@@ -312,11 +312,33 @@ export interface RecentNote {
   date: string;
   text: string;
   badges: string[];
+  reaffirmed_dates: string[];
+}
+
+export interface SafetyEvent {
+  event_date: string | null;
+  text: string;
+  quote: string | null;
+}
+
+export interface ClinicalSummary {
+  summary: string;
+  safety: {
+    has_events: boolean;
+    events: SafetyEvent[];
+    no_events_text: string;
+  };
+  medication_response: { text: string };
+  trajectory: { text: string };
+  generated_at: string;
+  window_days: number;
+  validation_warnings: string[];
 }
 
 export interface ClinicianPortalResponse {
   window: PortalWindow;
   patient: { name: string; age: number | null; active_medications: string[] };
+  clinical_summary: ClinicalSummary | null;
   stats: PortalStats;
   flags: PortalFlag[];
   symptom_frequency: SymptomFrequencyEntry[];

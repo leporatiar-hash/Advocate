@@ -1,54 +1,56 @@
 import type { PortalFlag } from "../../lib/types";
-import { EmptyState } from "./EmptyState";
 
-function AlertIcon({ color }: { color: string }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-    </svg>
-  );
+const LABELS: Record<PortalFlag["severity"], string> = { high: "HIGH", moderate: "MODERATE", low: "LOW" };
+
+function metricLabel(metric: string): string {
+  switch (metric) {
+    case "symptom": return "Symptom pattern";
+    case "med_adherence": return "Medication adherence";
+    case "sleep": return "Sleep";
+    case "log_frequency": return "Logging gap";
+    default: return metric;
+  }
 }
 
-const LABELS: Record<PortalFlag["severity"], string> = { high: "High", moderate: "Moderate", low: "Low" };
-
 export function FlagList({ flags }: { flags: PortalFlag[] }) {
-  if (!flags.length) return <EmptyState text="No flags in this period." />;
-
   return (
-    <div className="space-y-2">
-      {flags.map((flag, i) => {
-        // Red is reserved for the single top-ranked flag; every other flag —
-        // even another "high" one — reads as amber so red stays rare.
-        const isTopSeverity = i === 0 && flag.severity === "high";
-        const palette = isTopSeverity
-          ? { bg: "var(--cp-red-light)", color: "var(--cp-red)" }
-          : flag.severity === "low"
-          ? { bg: "#F3F4F6", color: "var(--cp-text-muted)" }
-          : { bg: "var(--cp-amber-light)", color: "var(--cp-amber)" };
+    <div className="rounded-2xl p-5" style={{ background: "var(--cp-flag-bg)", border: `1px solid var(--cp-flag-border)` }}>
+      <h2 className="text-base font-bold" style={{ color: "var(--cp-text)" }}>Flagged This Period</h2>
+      <p className="text-xs italic mt-1 mb-4" style={{ color: "var(--cp-text-muted)" }}>
+        Deterministic flags computed from logged severity and frequency — placed after the summary so they don&apos;t color the read.
+      </p>
 
-        return (
-          <div
-            key={i}
-            className="flex items-start gap-3 rounded-xl border p-3"
-            style={{ background: "#fff", borderColor: "var(--cp-border)" }}
-          >
-            <span
-              className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5"
-              style={{ background: palette.bg }}
-            >
-              <AlertIcon color={palette.color} />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-wide" style={{ color: palette.color }}>
-                {LABELS[flag.severity]}
-              </p>
-              <p className="text-sm mt-0.5 leading-snug" style={{ color: "var(--cp-text)" }}>
-                {flag.text}
-              </p>
-            </div>
-          </div>
-        );
-      })}
+      {!flags.length ? (
+        <p className="text-sm" style={{ color: "var(--cp-text-muted)" }}>No flags in this period.</p>
+      ) : (
+        <div className="divide-y" style={{ borderColor: "var(--cp-flag-border)" }}>
+          {flags.map((flag, i) => {
+            // Red is reserved for the single top-ranked flag; every other flag —
+            // even another "high" one — reads as amber so red stays rare.
+            const isTopSeverity = i === 0 && flag.severity === "high";
+            const pillColor = isTopSeverity
+              ? "var(--cp-red)"
+              : flag.severity === "low"
+              ? "var(--cp-text-muted)"
+              : "var(--cp-amber)";
+
+            return (
+              <div key={i} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span
+                    className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white flex-shrink-0"
+                    style={{ background: pillColor }}
+                  >
+                    {LABELS[flag.severity]}
+                  </span>
+                  <p className="text-sm font-bold" style={{ color: "var(--cp-text)" }}>{metricLabel(flag.metric)}</p>
+                </div>
+                <p className="text-sm leading-snug" style={{ color: "var(--cp-text)" }}>{flag.text}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

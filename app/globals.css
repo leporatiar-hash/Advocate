@@ -72,6 +72,8 @@ input[type="range"]::-moz-range-thumb {
   --cp-text: #374151;
   --cp-text-muted: #6B7280;
   --cp-bg: #FAFAF7;
+  --cp-flag-bg: #FBF3E7;
+  --cp-flag-border: #EDE0CC;
   --cp-border: #E5E7EB;
   font-family: var(--font-inter), Arial, Helvetica, sans-serif;
   background: var(--cp-bg);

@@ -359,6 +359,7 @@ class SymptomLoadStat(BaseModel):
 
 class AvgSleepStat(BaseModel):
     hours: Optional[float] = None
+    days_logged: int
 
 
 class MedAdherenceStat(BaseModel):
@@ -395,11 +396,42 @@ class RecentNote(BaseModel):
     date: date
     text: str
     badges: List[str]
+    reaffirmed_dates: List[date] = []
+
+
+class SafetyEvent(BaseModel):
+    # Named event_date, not date: a field literally named `date` on the same line as
+    # the `Optional[date]` type collides during Pydantic's annotation resolution and
+    # silently collapses the type to None-only — confirmed by a live 500 in testing.
+    event_date: Optional[date] = None  # None if the AI cited a date we couldn't verify
+    text: str
+    quote: Optional[str] = None
+
+
+class ClinicalSummarySafety(BaseModel):
+    has_events: bool
+    events: List[SafetyEvent]
+    no_events_text: str
+
+
+class ClinicalSummaryProse(BaseModel):
+    text: str
+
+
+class ClinicalSummary(BaseModel):
+    summary: str
+    safety: ClinicalSummarySafety
+    medication_response: ClinicalSummaryProse
+    trajectory: ClinicalSummaryProse
+    generated_at: datetime
+    window_days: int
+    validation_warnings: List[str] = []
 
 
 class ClinicianPortalResponse(BaseModel):
     window: PortalWindow
     patient: PortalPatient
+    clinical_summary: Optional[ClinicalSummary] = None
     stats: PortalStats
     flags: List[PortalFlag]
     symptom_frequency: List[SymptomFrequencyEntry]

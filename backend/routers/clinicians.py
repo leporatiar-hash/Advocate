@@ -8,7 +8,7 @@ from database import get_db
 import models
 import schemas
 from auth import get_current_clinician
-from services.aggregation import build_patient_aggregate, build_flags
+from services.aggregation import build_patient_aggregate, build_flags, group_observation_periods, SLEEP_DATA_FLOOR
 
 router = APIRouter()
 
@@ -40,15 +40,15 @@ def _age_from_dob(dob: Optional[date_type]) -> Optional[int]:
     return years
 
 
-def _note_badges(log: models.DailyLog) -> List[str]:
+def _note_badges(period: dict) -> List[str]:
     badges = []
-    episode = log.episode or {}
+    episode = period.get("episode") or {}
     if episode.get("occurred"):
         badges.append("Episode")
-    for s in (log.symptoms or []):
+    for s in (period.get("symptoms") or []):
         if (s.get("severity") or 0) >= 8:
             badges.append(f"{s['name']} severe")
-    meds = log.medications_taken or []
+    meds = period.get("medications_taken") or []
     if any(not m.get("taken") for m in meds):
         badges.append("Missed dose")
     return badges[:3]
@@ -115,24 +115,47 @@ def get_clinician_portal(
         for d in agg["adherence"].values()
     ]
 
-    recent_note_logs = (
+    # Not window-bound by design (the latest caregiver voice should always show),
+    # so this is a separate, full-history query — then deduplicated through the
+    # same same_as_yesterday collapsing as everything else, so a note reaffirmed
+    # verbatim on the following days doesn't show up as 3 identical entries.
+    all_logs = (
         db.query(models.DailyLog)
         .options(defer(models.DailyLog.photo))
-        .filter(
-            models.DailyLog.patient_id == patient_id,
-            models.DailyLog.notes.isnot(None),
-            models.DailyLog.notes != "",
-        )
-        .order_by(models.DailyLog.date.desc())
-        .limit(5)
+        .filter(models.DailyLog.patient_id == patient_id)
+        .order_by(models.DailyLog.date.asc())
         .all()
     )
+    notable_periods = [p for p in reversed(group_observation_periods(all_logs)) if p["notes"]]
     recent_notes = [
-        {"date": log.date, "text": log.notes, "badges": _note_badges(log)}
-        for log in recent_note_logs
+        {
+            "date": p["date"],
+            "text": p["notes"],
+            "badges": _note_badges(p),
+            "reaffirmed_dates": p["repeated_dates"],
+        }
+        for p in notable_periods[:5]
     ]
 
     active_medications = [f"{m.name} {m.dose}".strip() for m in agg["medications"]]
+
+    sleep_days_logged = len(agg["sleep_vals"])
+    sleep_hours = agg["avg_sleep"] if sleep_days_logged >= SLEEP_DATA_FLOOR else None
+
+    # Read-only cache lookup — never generates. The synthesis is produced exclusively
+    # by scripts/generate_synthesis.py so a portal page load never calls OpenAI.
+    synthesis_row = (
+        db.query(models.ClinicianNoteSynthesis)
+        .filter(models.ClinicianNoteSynthesis.patient_id == patient_id)
+        .first()
+    )
+    clinical_summary = None
+    if synthesis_row:
+        clinical_summary = {
+            **synthesis_row.content,
+            "generated_at": synthesis_row.generated_at,
+            "window_days": synthesis_row.window_days,
+        }
 
     return {
         "window": agg["window"],
@@ -141,6 +164,7 @@ def get_clinician_portal(
             "age": _age_from_dob(patient.date_of_birth),
             "active_medications": active_medications,
         },
+        "clinical_summary": clinical_summary,
         "stats": {
             "log_frequency": {
                 "days_logged": agg["days_logged"],
@@ -151,7 +175,7 @@ def get_clinician_portal(
                 "avg_severity": avg_symptom_severity,
                 "distinct_symptoms": len(agg["symptom_stats"]),
             },
-            "avg_sleep": {"hours": agg["avg_sleep"]},
+            "avg_sleep": {"hours": sleep_hours, "days_logged": sleep_days_logged},
             "med_adherence": {"pct": agg["adherence_totals"]["pct"]},
         },
         "flags": flags,

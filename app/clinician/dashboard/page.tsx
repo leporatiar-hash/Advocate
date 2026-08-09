@@ -10,6 +10,7 @@ import { FlagList } from "../../components/clinician/FlagList";
 import { SymptomFrequencyBars } from "../../components/clinician/SymptomFrequencyBars";
 import { MedAdherenceBars } from "../../components/clinician/MedAdherenceBars";
 import { RecentNotes } from "../../components/clinician/RecentNotes";
+import { ClinicalSummary } from "../../components/clinician/ClinicalSummary";
 import type { ClinicianPortalResponse } from "../../lib/types";
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -68,7 +69,7 @@ function DashboardContent() {
     );
   }
 
-  const { patient, stats, flags, symptom_frequency, med_adherence, recent_notes, window } = portal;
+  const { patient, clinical_summary, stats, flags, symptom_frequency, med_adherence, recent_notes, window } = portal;
 
   return (
     <div className="min-h-screen pb-10">
@@ -78,7 +79,15 @@ function DashboardContent() {
 
         {/* Patient header */}
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: "var(--cp-text)" }}>{patient.name}</h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-2xl font-bold" style={{ color: "var(--cp-text)" }}>{patient.name}</h1>
+            <span
+              className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full"
+              style={{ background: "var(--cp-teal-light)", color: "var(--cp-teal)", letterSpacing: "0.05em" }}
+            >
+              Read-only
+            </span>
+          </div>
           <p className="text-sm mt-0.5" style={{ color: "var(--cp-text-muted)" }}>
             {patient.age !== null ? `Age ${patient.age}` : "Age unknown"}
             {patient.active_medications.length > 0 ? ` · ${patient.active_medications.join(", ")}` : ""}
@@ -88,55 +97,86 @@ function DashboardContent() {
           </p>
         </div>
 
-        {/* 4 stat cards */}
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            label="Log Frequency"
-            value={`${stats.log_frequency.days_logged}/${stats.log_frequency.days_in_window}`}
-            sublabel={`${stats.log_frequency.pct}% of days logged`}
-          />
-          <StatCard
-            label="Symptom Load"
-            value={stats.symptom_load.avg_severity != null ? `${stats.symptom_load.avg_severity}/10` : "—"}
-            sublabel={`${stats.symptom_load.distinct_symptoms} distinct symptom${stats.symptom_load.distinct_symptoms !== 1 ? "s" : ""}`}
-          />
-          <StatCard
-            label="Avg Sleep"
-            value={stats.avg_sleep.hours != null ? `${stats.avg_sleep.hours}h` : "—"}
-          />
-          <StatCard
-            label="Med Adherence"
-            value={`${stats.med_adherence.pct}%`}
-          />
-        </div>
+        {/* Clinical Summary — the hero, synthesized from caregiver notes */}
+        <ClinicalSummary data={clinical_summary} patientId={patientId} />
 
-        {/* Flags */}
+        {/* Supporting structured data — demoted below the notes synthesis */}
         <div>
-          <SectionTitle>Flags</SectionTitle>
-          <FlagList flags={flags} />
-        </div>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--cp-text-muted)", letterSpacing: "0.08em" }}>
+            Supporting Data
+          </p>
 
-        {/* Symptom frequency */}
-        <div>
-          <SectionTitle>Symptom Frequency</SectionTitle>
-          <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
-            <SymptomFrequencyBars data={symptom_frequency} windowDays={window.days} />
+          <div className="space-y-6">
+            {/* 4 stat cards */}
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard
+                label="Log Frequency"
+                value={`${stats.log_frequency.days_logged}/${stats.log_frequency.days_in_window}`}
+                sublabel={`${stats.log_frequency.pct}% of days logged`}
+              />
+              <StatCard
+                label="Symptom Load"
+                value={stats.symptom_load.avg_severity != null ? `${stats.symptom_load.avg_severity}/10` : "—"}
+                sublabel={`${stats.symptom_load.distinct_symptoms} distinct symptom${stats.symptom_load.distinct_symptoms !== 1 ? "s" : ""}`}
+              />
+              <StatCard
+                label="Avg Sleep"
+                value={
+                  stats.avg_sleep.hours != null
+                    ? `${stats.avg_sleep.hours}h`
+                    : stats.avg_sleep.days_logged > 0
+                    ? "Insufficient data"
+                    : "No data"
+                }
+                sublabel={
+                  stats.avg_sleep.hours == null
+                    ? `${stats.avg_sleep.days_logged} of ${window.days} days logged`
+                    : undefined
+                }
+              />
+              <StatCard
+                label="Med Adherence"
+                value={`${stats.med_adherence.pct}%`}
+              />
+            </div>
+
+            {/* Flags */}
+            <FlagList flags={flags} />
+
+            {/* Symptom frequency */}
+            <div>
+              <SectionTitle>Symptom Frequency</SectionTitle>
+              <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
+                <SymptomFrequencyBars data={symptom_frequency} windowDays={window.days} />
+              </div>
+            </div>
+
+            {/* Medication adherence */}
+            <div>
+              <SectionTitle>Medication Adherence</SectionTitle>
+              <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
+                <MedAdherenceBars data={med_adherence} />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Medication adherence */}
-        <div>
-          <SectionTitle>Medication Adherence</SectionTitle>
-          <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
-            <MedAdherenceBars data={med_adherence} />
+        {/* Raw notes — chronological, collapsed by default, deduplicated */}
+        <details className="group">
+          <summary className="text-xs font-bold uppercase tracking-wide mb-2 cursor-pointer select-none list-none flex items-center gap-1.5" style={{ color: "var(--cp-text-muted)" }}>
+            <svg className="w-3.5 h-3.5 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            Raw Notes
+          </summary>
+          <div className="mt-2">
+            <RecentNotes notes={recent_notes} patientId={patientId} />
           </div>
-        </div>
+        </details>
 
-        {/* Recent notes */}
-        <div>
-          <SectionTitle>Recent Caregiver Notes</SectionTitle>
-          <RecentNotes notes={recent_notes} patientId={patientId} />
-        </div>
+        <p className="text-xs text-center pt-2" style={{ color: "var(--cp-text-muted)" }}>
+          Read-only pre-visit summary generated by Advocate from caregiver-logged observations. Not a diagnostic tool.
+        </p>
 
       </div>
     </div>

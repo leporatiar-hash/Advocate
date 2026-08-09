@@ -40,6 +40,11 @@ export function RecentNotes({ notes, patientId }: { notes: RecentNote[]; patient
           <p className="text-sm line-clamp-2 leading-snug" style={{ color: "var(--cp-text)" }}>
             {n.text}
           </p>
+          {n.reaffirmed_dates.length > 0 && (
+            <p className="text-xs mt-1.5" style={{ color: "var(--cp-text-muted)" }}>
+              Reaffirmed without new detail on {n.reaffirmed_dates.map(fmtDate).join(", ")}
+            </p>
+          )}
         </Link>
       ))}
     </div>
