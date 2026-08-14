@@ -15,6 +15,7 @@ export function RecentNotes({ notes, patientId }: { notes: RecentNote[]; patient
       {notes.map((n) => (
         <Link
           key={n.date}
+          id={`note-${n.date}`}
           href={`/clinician/log/?patient_id=${patientId}&date=${n.date}`}
           className="block rounded-xl border p-3 transition-colors hover:border-[var(--cp-teal)]"
           style={{ background: "#fff", borderColor: "var(--cp-border)" }}

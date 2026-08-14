@@ -29,15 +29,15 @@ export function RankedFlag({ topFlag, patientId }: { topFlag: TopFlag | null; pa
       <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--cp-red)" }}>
         Highest-severity note · {fmtDate(topFlag.date)}
       </p>
-      <p className="text-sm mt-1.5" style={{ color: "var(--cp-text)" }}>{topFlag.text}</p>
-      {topFlag.quote && (
-        <p
-          className="text-sm italic mt-2 pl-3"
-          style={{ color: "var(--cp-text-muted)", borderLeft: "2px solid var(--cp-red)" }}
-        >
-          &ldquo;{topFlag.quote}&rdquo;
-        </p>
-      )}
+      {/* text and quote are always the same caregiver note verbatim — shown
+          once, as a quote, rather than duplicated as a synthesized lead-in
+          plus a repeated quote below it. */}
+      <p
+        className="text-sm italic mt-2 pl-3"
+        style={{ color: "var(--cp-text)", borderLeft: "2px solid var(--cp-red)" }}
+      >
+        &ldquo;{topFlag.quote ?? topFlag.text}&rdquo;
+      </p>
     </Link>
   );
 }

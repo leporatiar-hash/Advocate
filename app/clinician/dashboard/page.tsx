@@ -1,16 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "../../lib/api";
 import { useAuth } from "../../components/AuthProvider";
 import { ClinicianHeader } from "../../components/clinician/ClinicianHeader";
 import { StatCard } from "../../components/clinician/StatCard";
-import { FlagList } from "../../components/clinician/FlagList";
 import { SymptomFrequencyBars } from "../../components/clinician/SymptomFrequencyBars";
 import { MedAdherenceBars } from "../../components/clinician/MedAdherenceBars";
 import { RecentNotes } from "../../components/clinician/RecentNotes";
-import { ClinicalSummary } from "../../components/clinician/ClinicalSummary";
+import { InsightUnits } from "../../components/clinician/InsightUnits";
 import { GlanceLayer } from "../../components/clinician/GlanceLayer";
 import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
 import { RankedFlag } from "../../components/clinician/RankedFlag";
@@ -33,6 +32,24 @@ function DashboardContent() {
   const [portal, setPortal] = useState<ClinicianPortalResponse | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [error, setError] = useState(false);
+  const rawNotesRef = useRef<HTMLDetailsElement>(null);
+
+  // Opens the Raw Notes disclosure (if closed) and scrolls the cited note(s)
+  // into view with a brief highlight — the credibility mechanism an insight's
+  // "N notes" link exists for, so this can't be deferred to a plain nav-away.
+  const revealNotes = useCallback((dates: string[]) => {
+    if (rawNotesRef.current) rawNotesRef.current.open = true;
+    setTimeout(() => {
+      dates.forEach((date) => {
+        const el = document.getElementById(`note-${date}`);
+        if (!el) return;
+        el.classList.add("note-highlight");
+        setTimeout(() => el.classList.remove("note-highlight"), 1600);
+      });
+      const firstEl = dates[0] ? document.getElementById(`note-${dates[0]}`) : null;
+      firstEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -72,7 +89,7 @@ function DashboardContent() {
     );
   }
 
-  const { patient, clinical_summary, stats, flags, symptom_frequency, med_adherence, recent_notes, window, trajectory, top_flag } = portal;
+  const { patient, clinical_summary, stats, symptom_frequency, med_adherence, recent_notes, window, trajectory, top_flag } = portal;
 
   return (
     <div className="min-h-screen pb-10">
@@ -103,84 +120,59 @@ function DashboardContent() {
         {/* Glance layer — the 5-second read; everything below is for the clinician who wants more */}
         <GlanceLayer portal={portal} />
 
-        {/* Clinical Summary — the hero, synthesized from caregiver notes */}
-        <ClinicalSummary data={clinical_summary} patientId={patientId} />
+        {/* Insight units — the hero, synthesized from caregiver notes */}
+        <InsightUnits insights={clinical_summary?.insights ?? []} onReveal={revealNotes} />
 
-        {/* Supporting structured data — demoted below the notes synthesis */}
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: "var(--cp-text-muted)", letterSpacing: "0.08em" }}>
-            Supporting Data
-          </p>
+        {/* Objective trends — glance owns adherence/symptom-load/episodes/days
+            now, so only the metrics with no glance equivalent stay here. */}
+        <div className="space-y-6">
+          <StatCard
+            label="Avg Sleep"
+            value={
+              stats.avg_sleep.hours != null
+                ? `${stats.avg_sleep.hours}h`
+                : stats.avg_sleep.days_logged > 0
+                ? "Insufficient data"
+                : "No data"
+            }
+            sublabel={
+              stats.avg_sleep.hours == null
+                ? `${stats.avg_sleep.days_logged} of ${window.days} days logged`
+                : undefined
+            }
+          />
 
-          <div className="space-y-6">
-            {/* 4 stat cards */}
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard
-                label="Log Frequency"
-                value={`${stats.log_frequency.days_logged}/${stats.log_frequency.days_in_window}`}
-                sublabel={`${stats.log_frequency.pct}% of days logged`}
-              />
-              <StatCard
-                label="Symptom Load"
-                value={stats.symptom_load.avg_severity != null ? `${stats.symptom_load.avg_severity}/10` : "—"}
-                sublabel={`${stats.symptom_load.distinct_symptoms} distinct symptom${stats.symptom_load.distinct_symptoms !== 1 ? "s" : ""}`}
-              />
-              <StatCard
-                label="Avg Sleep"
-                value={
-                  stats.avg_sleep.hours != null
-                    ? `${stats.avg_sleep.hours}h`
-                    : stats.avg_sleep.days_logged > 0
-                    ? "Insufficient data"
-                    : "No data"
-                }
-                sublabel={
-                  stats.avg_sleep.hours == null
-                    ? `${stats.avg_sleep.days_logged} of ${window.days} days logged`
-                    : undefined
-                }
-              />
-              <StatCard
-                label="Med Adherence"
-                value={`${stats.med_adherence.pct}%`}
-              />
+          {/* How the month moved */}
+          <div>
+            <SectionTitle>How the Month Moved</SectionTitle>
+            <TrajectoryStrip days={trajectory.days} />
+          </div>
+
+          {/* Symptom frequency */}
+          <div>
+            <SectionTitle>Symptom Frequency</SectionTitle>
+            <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
+              <SymptomFrequencyBars data={symptom_frequency} windowDays={window.days} />
             </div>
+          </div>
 
-            {/* Flags */}
-            <FlagList flags={flags} />
+          {/* Ranked flag — the one and only flag section, red reserved for this only */}
+          <div>
+            <SectionTitle>Flagged This Period</SectionTitle>
+            <RankedFlag topFlag={top_flag} patientId={patientId} />
+          </div>
 
-            {/* How the month moved */}
-            <div>
-              <SectionTitle>How the Month Moved</SectionTitle>
-              <TrajectoryStrip days={trajectory.days} />
-            </div>
-
-            {/* Symptom frequency */}
-            <div>
-              <SectionTitle>Symptom Frequency</SectionTitle>
-              <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
-                <SymptomFrequencyBars data={symptom_frequency} windowDays={window.days} />
-              </div>
-            </div>
-
-            {/* Medication adherence */}
-            <div>
-              <SectionTitle>Medication Adherence</SectionTitle>
-              <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
-                <MedAdherenceBars data={med_adherence} />
-              </div>
-            </div>
-
-            {/* Ranked flag — the single highest-severity note, red reserved for this only */}
-            <div>
-              <SectionTitle>Flagged This Period</SectionTitle>
-              <RankedFlag topFlag={top_flag} patientId={patientId} />
+          {/* Medication adherence */}
+          <div>
+            <SectionTitle>Medication Adherence</SectionTitle>
+            <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
+              <MedAdherenceBars data={med_adherence} />
             </div>
           </div>
         </div>
 
         {/* Raw notes — chronological, collapsed by default, deduplicated */}
-        <details className="group">
+        <details className="group" ref={rawNotesRef}>
           <summary className="text-xs font-bold uppercase tracking-wide mb-2 cursor-pointer select-none list-none flex items-center gap-1.5" style={{ color: "var(--cp-text-muted)" }}>
             <svg className="w-3.5 h-3.5 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

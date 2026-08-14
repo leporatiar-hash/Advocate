@@ -318,21 +318,16 @@ export interface RecentNote {
   reaffirmed_dates: string[];
 }
 
-export interface SafetyEvent {
-  event_date: string | null;
-  text: string;
-  quote: string | null;
+export interface InsightUnit {
+  category: string;
+  observation: string;
+  takeaway: string;
+  chip: "watch" | "steady" | "low_data";
+  source_note_ids: string[];
 }
 
 export interface ClinicalSummary {
-  summary: string;
-  safety: {
-    has_events: boolean;
-    events: SafetyEvent[];
-    no_events_text: string;
-  };
-  medication_response: { text: string };
-  trajectory: { text: string };
+  insights: InsightUnit[];
   generated_at: string;
   window_days: number;
   validation_warnings: string[];
@@ -356,6 +351,7 @@ export interface TrajectoryDay {
   severity: number | null;
   episode: boolean;
   smoked: boolean;
+  logged: boolean;
 }
 
 export interface PortalTrajectory {

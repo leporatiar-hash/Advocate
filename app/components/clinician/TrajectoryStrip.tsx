@@ -27,6 +27,14 @@ export function TrajectoryStrip({ days }: { days: TrajectoryDay[] }) {
   if (!days.length) return null;
   const mid = days[Math.floor(days.length / 2)];
 
+  // lifestyle.smoked is boolean, not a count, so for a near-daily smoker the
+  // row is uniformly filled and carries no signal — render it only when the
+  // logged days actually vary, so a shown row can still reveal clustering
+  // near episode days. (A real cigarette-count field would make this row
+  // worth showing unconditionally, but that's a separate field, not added here.)
+  const loggedSmokedValues = new Set(days.filter((d) => d.logged).map((d) => d.smoked));
+  const showSmokingRow = loggedSmokedValues.size > 1;
+
   return (
     <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
       <div className="space-y-2.5">
@@ -46,15 +54,17 @@ export function TrajectoryStrip({ days }: { days: TrajectoryDay[] }) {
             </span>
           ))}
         </Row>
-        <Row label="Smoking">
-          {days.map((d) => (
-            <span
-              key={d.date}
-              className="flex-1 h-2 rounded-sm"
-              style={{ background: d.smoked ? "var(--cp-amber)" : "var(--cp-border)", opacity: d.smoked ? 1 : 0.4 }}
-            />
-          ))}
-        </Row>
+        {showSmokingRow && (
+          <Row label="Smoking">
+            {days.map((d) => (
+              <span
+                key={d.date}
+                className="flex-1 h-2 rounded-sm"
+                style={{ background: d.smoked ? "var(--cp-amber)" : "var(--cp-border)", opacity: d.smoked ? 1 : 0.4 }}
+              />
+            ))}
+          </Row>
+        )}
       </div>
       <div className="flex justify-between text-[10px] mt-2" style={{ color: "var(--cp-text-muted)" }}>
         <span>{fmtShort(days[0].date)}</span>

@@ -8,6 +8,25 @@ const STATUS_CONFIG: Record<Status, { label: string; color: string; bg: string }
   stable: { label: "Stable", color: "var(--cp-teal)", bg: "var(--cp-teal-light)" },
 };
 
+function fmtShortDate(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// Deltas-only headline for when there's no top flag to point at — describes
+// the three glance metrics in plain language instead of falling back to a
+// generic "nothing changed" line that hides real, non-flagged movement.
+function deltaHeadline(glance_stats: ClinicianPortalResponse["glance_stats"]): string {
+  const adherenceWord = { up: "improving", down: "declining", steady: "steady" }[glance_stats.adherence.direction];
+  const episodesWord = { up: "rising", down: "falling", steady: "steady" }[glance_stats.flagged_episodes.direction];
+  const loadWord = { up: "rising", down: "easing", steady: "steady" }[glance_stats.symptom_load.direction];
+
+  if (adherenceWord === "steady" && episodesWord === "steady" && loadWord === "steady") {
+    return "Adherence, episodes, and symptom load all steady this period.";
+  }
+  return `Adherence ${adherenceWord}. Episodes ${episodesWord}, symptom load ${loadWord}.`;
+}
+
 // Single place that decides the pill + headline, so "what counts as needing a
 // look" never drifts between two copies of the same rule.
 export function deriveGlanceStatus(portal: ClinicianPortalResponse): { status: Status; headline: string } {
@@ -16,8 +35,10 @@ export function deriveGlanceStatus(portal: ClinicianPortalResponse): { status: S
   if (top_flag || glance_stats.flagged_episodes.direction === "up") {
     return {
       status: "review",
+      // Names the flag without repeating its (potentially long) note text —
+      // the real content lives in the Flagged This Period card below, once.
       headline: top_flag
-        ? top_flag.text
+        ? `Highest-severity note logged ${fmtShortDate(top_flag.date)}. See Flagged This Period below.`
         : `Flagged episodes rose to ${glance_stats.flagged_episodes.value} this period, up from ${glance_stats.flagged_episodes.prev ?? 0}.`,
     };
   }
@@ -29,7 +50,7 @@ export function deriveGlanceStatus(portal: ClinicianPortalResponse): { status: S
     };
   }
 
-  return { status: "stable", headline: "No major changes since the prior period." };
+  return { status: "stable", headline: deltaHeadline(glance_stats) };
 }
 
 function TrendArrow({ direction }: { direction: TrendStat["direction"] }) {

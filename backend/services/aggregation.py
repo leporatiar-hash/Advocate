@@ -363,7 +363,12 @@ def build_trajectory(logs, start_date: date_type, end_date: date_type) -> list:
     """One row per calendar day in the window: average symptom severity that day
     (None if nothing was logged), whether an episode occurred, and whether the
     caregiver flagged smoking that day. Gaps (no log that day) render as nulls
-    rather than being skipped, so the strip's day spacing stays uniform."""
+    rather than being skipped, so the strip's day spacing stays uniform.
+
+    `logged` distinguishes "logged, not smoked" from "no log at all that day" —
+    without it, a day with no log defaults smoked=False the same as a real
+    logged non-smoking day, which would corrupt a true/false variation check on
+    the smoking series (see TrajectoryStrip's smoking-row gating)."""
     by_date = {}
     for log in logs:
         severities = [s.get("severity") for s in (log.symptoms or []) if s.get("severity") is not None]
@@ -371,43 +376,62 @@ def build_trajectory(logs, start_date: date_type, end_date: date_type) -> list:
             "severity": round(sum(severities) / len(severities), 1) if severities else None,
             "episode": bool((log.episode or {}).get("occurred")),
             "smoked": bool((log.lifestyle or {}).get("smoked")),
+            "logged": True,
         }
 
     days = []
     d = start_date
     while d <= end_date:
-        entry = by_date.get(d, {"severity": None, "episode": False, "smoked": False})
+        entry = by_date.get(d, {"severity": None, "episode": False, "smoked": False, "logged": False})
         days.append({"date": d, **entry})
         d += timedelta(days=1)
     return days
 
 
-def build_top_flag(observation_periods: list) -> Optional[dict]:
-    """The single highest-severity logged symptom this period, deterministically
-    picked (no LLM) — the one note the clinician should read if they read nothing
-    else. Returns None if nothing in the window reached high severity."""
-    best_period = None
-    best_symptom = None
+def build_top_flag(observation_periods: list, symptom_stats: dict) -> Optional[dict]:
+    """The single flag a clinician should read first, deterministically picked
+    (no LLM, no synthesized description). A note only qualifies if it carries
+    real weight: either an episode was logged, or it has a symptom at severity
+    >= 8 that is NOT a single-occurrence low-n spike (see TREND_LOW_N_DAYS) — a
+    symptom logged once or twice must never win the loudest slot on the page,
+    the same rule the symptom bars already enforce. The body is always the
+    caregiver's own note text, never a templated string, and a candidate with no
+    note text to show is excluded rather than backfilled with one. Returns None
+    if nothing in the window qualifies — a low-n spike is never manufactured
+    into a flag just to fill the slot."""
+    candidates = []
     for period in observation_periods:
-        symptoms = [s for s in (period.get("symptoms") or []) if s.get("severity") is not None]
-        if not symptoms:
+        notes_text = period.get("notes")
+        if not notes_text:
             continue
-        top = max(symptoms, key=lambda s: s["severity"])
-        # >= , not >: on a tie, the more recent occurrence wins. Periods here are
-        # ascending by date, so the last equally-severe hit overwrites earlier
-        # ones — a peak severity repeated weeks apart should surface the recent
-        # one, since that's the one still actionable at the next visit.
-        if best_symptom is None or top["severity"] >= best_symptom["severity"]:
-            best_symptom = top
-            best_period = period
 
-    if not best_period or not best_symptom or best_symptom["severity"] < 8:
+        episode_occurred = bool((period.get("episode") or {}).get("occurred"))
+        symptoms = [s for s in (period.get("symptoms") or []) if s.get("severity") is not None]
+        qualifying = [
+            s for s in symptoms
+            if s["severity"] >= 8
+            and symptom_stats.get(s["name"], {}).get("days_present", 0) >= TREND_LOW_N_DAYS
+        ]
+        if not episode_occurred and not qualifying:
+            continue
+
+        top_severity = max((s["severity"] for s in qualifying), default=0)
+        candidates.append({"period": period, "is_episode": episode_occurred, "top_severity": top_severity})
+
+    if not candidates:
         return None
 
-    date_str = best_period["date"].isoformat()
+    # Episode notes first, then highest qualifying severity, then most recent —
+    # a period's own ascending `date` breaks the final tie correctly since
+    # observation_periods is already date-ascending.
+    best = max(candidates, key=lambda c: (c["is_episode"], c["top_severity"], c["period"]["date"]))
+
+    period = best["period"]
+    date_str = period["date"].isoformat()
+    notes_text = period.get("notes")
     return {
         "date": date_str,
-        "text": f"Highest-severity note this period: {best_symptom['name']} logged at {best_symptom['severity']}/10.",
-        "quote": best_period.get("notes"),
+        "text": notes_text,
+        "quote": notes_text,
         "note_id": date_str,
     }

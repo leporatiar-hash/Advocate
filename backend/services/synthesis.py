@@ -1,7 +1,6 @@
 import json
 import os
 import re
-from datetime import date as date_type
 
 from openai import OpenAI
 from sqlalchemy.orm import Session
@@ -17,29 +16,35 @@ _COUNT_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Fixed display order — insights render in this order regardless of what order
+# the model returns them in, and any category the model invents outside this
+# list is dropped.
+CATEGORIES = ["Medication", "Mood and behavior", "Substance", "Isolation and socialization", "Sleep"]
+
+VALID_CHIPS = {"watch", "steady", "low_data"}
+
 SYSTEM_PROMPT = (
     "You are a clinical documentation assistant. You read a caregiver's free-text "
-    "daily observations about a patient and synthesize them into a structured "
-    "clinical summary for a psychiatrist reviewing the case.\n\n"
+    "daily observations about a patient and produce short, structured insight units "
+    "for a psychiatrist reviewing the case before a visit.\n\n"
     "HARD RULES, no exceptions:\n"
     "1. ATTRIBUTE, NEVER DIAGNOSE. Write what the caregiver observed or reported, "
     "never a clinical conclusion. Say \"caregiver reports the patient described "
     "voices instructing self-harm\", never \"patient has command hallucinations\" "
     "or any diagnostic label. The caregiver observes; the clinician concludes. "
     "Violating this discredits the entire tool with a real psychiatrist.\n"
-    "2. WRITE PROSE ONLY. Never state a count, frequency, or number of occurrences "
-    "(no \"3 episodes\", no \"twice this week\", no severity numbers). All counts "
-    "are computed separately by the system, not by you. If frequency matters, use "
-    "qualitative language sparingly (\"recurring\", \"a single instance\") — never "
-    "a digit tied to an occurrence count. Numbers that are not occurrence counts "
-    "(e.g. a medication dose mentioned by the caregiver) are fine.\n"
-    "3. QUOTE SPARINGLY. Use the caregiver's exact words only for the one or two "
-    "clinically sharpest lines, typically a safety statement. Every quote must be "
-    "copied verbatim from the notes provided — never paraphrase and present it as "
-    "a quote.\n"
-    "4. Every date you cite must be exactly one of the dates provided in the input. "
-    "Never invent, estimate, or shift a date.\n"
-    "5. Do not speculate beyond what the notes actually say.\n"
+    "2. NO COUNTS OR NUMBERS. Never state a count, frequency, severity number, or "
+    "occurrence tally (no \"3 episodes\", no \"twice this week\", no \"8/10\"). All "
+    "counts and flags are computed separately by the system, not by you. Use "
+    "qualitative language sparingly (\"recurring\", \"a single instance\") if "
+    "frequency matters — never a digit tied to an occurrence count.\n"
+    "3. PLAIN LANGUAGE, UNDER 20 WORDS PER OBSERVATION. Each observation is one "
+    "short sentence a clinician can scan in a few seconds.\n"
+    "4. NO EM DASHES. Use a period or comma instead.\n"
+    "5. Never use the words \"app\", \"diagnose\", \"recommend\", or \"Witness\".\n"
+    "6. Every date you cite in source_note_ids must be exactly one of the dates "
+    "provided in the input. Never invent, estimate, or shift a date.\n"
+    "7. Do not speculate beyond what the notes actually say.\n"
     "Return ONLY valid JSON matching the schema described in the user prompt — no "
     "markdown fences, no extra text."
 )
@@ -87,6 +92,7 @@ def _format_observation_periods(periods: list, med_names: dict) -> str:
 def build_synthesis_prompt(patient, periods: list, med_names: dict) -> tuple:
     obs_text = _format_observation_periods(periods, med_names)
     valid_dates = ", ".join(p["date"].isoformat() for p in periods)
+    categories_list = ", ".join(CATEGORIES)
 
     user_prompt = f"""Caregiver observations for {patient.name} ({patient.diagnosis}) — {len(periods)} distinct observations in the review window:
 
@@ -96,22 +102,24 @@ Valid dates you may cite (do not use any date outside this list): {valid_dates}
 
 Produce a JSON object with exactly this shape:
 {{
-  "summary": "3-4 sentence prose synthesis of the interval as a whole",
-  "safety": {{
-    "has_events": true or false,
-    "events": [
-      {{"date": "YYYY-MM-DD", "text": "attributed prose description of the safety-relevant observation", "quote": "verbatim quote from that day's notes, or null if none used"}}
-    ]
-  }},
-  "medication_response": {{
-    "text": "prose synthesis of medication adherence struggles, side effects, perceived efficacy, and substance use affecting medication (e.g. smoking and clozapine levels) drawn from the notes"
-  }},
-  "trajectory": {{
-    "text": "prose synthesis of good/bad day patterns, time-of-day patterns, triggers, and what helps, across the interval"
-  }}
+  "insights": [
+    {{
+      "category": "one of: {categories_list}",
+      "observation": "one short attributed sentence, under 20 words, plain language, non-diagnostic",
+      "takeaway": "the phrase within the observation to bold for fast scanning, copied verbatim from the observation text",
+      "chip": "one of: watch, steady, low_data",
+      "source_note_ids": ["YYYY-MM-DD", "..."]
+    }}
+  ]
 }}
 
-Safety events are: suicidal ideation, self-harm, command hallucinations, or acute dangerous episodes. If none appear anywhere in the notes, set has_events to false and events to an empty list — do not invent one to fill the section."""
+Rules for insights:
+- Categories, in this fixed order when present: {categories_list}.
+- Include a category only if the notes actually contain a relevant observation for it. Omit categories with nothing to say. Do not force an entry.
+- At most one insight per category.
+- "takeaway" must be an exact substring of "observation" so it can be bolded within it.
+- "chip" is "watch" if the observation describes something concerning or worth monitoring, "steady" if it describes a stable or unremarkable pattern, "low_data" if there is only sparse or single-instance evidence for it.
+- "source_note_ids" lists the specific date(s), from the valid list above, that this observation is actually drawn from."""
 
     return SYSTEM_PROMPT, user_prompt
 
@@ -121,6 +129,10 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
     the ONLY place in the codebase that should call OpenAI for the clinician
     portal — invoked exclusively by scripts/generate_synthesis.py, never by the
     portal's GET path, so a page load is always a cache read.
+
+    The model writes observation/takeaway prose only. Every number, flag, and the
+    top flag itself are computed deterministically elsewhere (services/aggregation.py)
+    and never touched here.
     """
     periods = [
         p for p in agg["observation_periods"]
@@ -133,13 +145,7 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
     }
 
     if not periods:
-        return {
-            "summary": "No caregiver notes, episodes, or symptoms were logged in this interval.",
-            "safety": {"has_events": False, "events": [], "no_events_text": "No safety events noted this interval."},
-            "medication_response": {"text": "No medication-related observations were logged in this interval."},
-            "trajectory": {"text": "Not enough logged detail this interval to describe a trajectory."},
-            "validation_warnings": [],
-        }
+        return {"insights": [], "validation_warnings": []}
 
     system_prompt, user_prompt = build_synthesis_prompt(patient, periods, med_names)
 
@@ -156,61 +162,60 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
     data = json.loads(raw)
 
     valid_dates = {p["date"].isoformat() for p in periods}
-    notes_by_date = {p["date"].isoformat(): (p["notes"] or "") for p in periods}
-
     warnings: list = []
+    insights: list = []
+    seen_categories: set = set()
 
-    # --- Validate safety events: date must be real, quote must be verbatim ---
-    safety_in = data.get("safety") or {}
-    events = []
-    for ev in (safety_in.get("events") or []):
-        text = (ev.get("text") or "").strip()
-        if not text:
+    for item in (data.get("insights") or []):
+        category = (item.get("category") or "").strip()
+        if category not in CATEGORIES:
+            warnings.append(f"Dropped an insight with an unrecognized category {category!r}.")
             continue
-        date_str = ev.get("date")
-        confirmed_date = date_str if date_str in valid_dates else None
-        if date_str and not confirmed_date:
-            warnings.append(
-                f"Safety event cited an unverifiable date ({date_str!r}); the date "
-                "was suppressed but the content was kept, since safety content is "
-                "never dropped for a formatting mismatch."
-            )
-        quote = ev.get("quote")
-        if quote:
-            source_text = notes_by_date.get(confirmed_date or date_str, "")
-            if quote.strip().lower() not in source_text.lower():
+        if category in seen_categories:
+            warnings.append(f"Dropped a second insight for category {category!r} — at most one per category.")
+            continue
+
+        observation = (item.get("observation") or "").strip()
+        if not observation:
+            continue
+
+        takeaway = (item.get("takeaway") or "").strip()
+        if takeaway and takeaway not in observation:
+            warnings.append(f"Takeaway for {category!r} was not a substring of its observation — takeaway dropped.")
+            takeaway = ""
+
+        chip = (item.get("chip") or "").strip()
+        if chip not in VALID_CHIPS:
+            warnings.append(f"Insight for {category!r} had an invalid chip {chip!r} — defaulted to 'watch'.")
+            chip = "watch"
+
+        source_note_ids = []
+        for note_id in (item.get("source_note_ids") or []):
+            if note_id in valid_dates:
+                source_note_ids.append(note_id)
+            else:
                 warnings.append(
-                    f"A quote attributed to {date_str!r} was not found verbatim in "
-                    "that day's notes — quote dropped, event text kept."
+                    f"Insight for {category!r} cited an unverifiable date {note_id!r} — dropped from source_note_ids."
                 )
-                quote = None
-        events.append({"event_date": confirmed_date, "text": text, "quote": quote})
+        if not source_note_ids:
+            warnings.append(f"Dropped insight for {category!r} — no verifiable source dates.")
+            continue
 
-    has_events = bool(events)  # ignore the model's own has_events if it contradicts its events list
-
-    # --- Soft check for count/frequency claims slipping into prose ---
-    prose_fields = {
-        "summary": data.get("summary", ""),
-        "medication_response": (data.get("medication_response") or {}).get("text", ""),
-        "trajectory": (data.get("trajectory") or {}).get("text", ""),
-    }
-    for ev in events:
-        prose_fields[f"safety_event[{ev['event_date']}]"] = ev["text"]
-    for field_name, text in prose_fields.items():
-        if _COUNT_CLAIM_PATTERN.search(text):
+        if _COUNT_CLAIM_PATTERN.search(observation):
             warnings.append(
-                f"Field {field_name!r} may contain a frequency/count claim the AI "
-                f"wrote itself — review before trusting: {text!r}"
+                f"Insight for {category!r} may contain a frequency/count claim the AI wrote itself — "
+                f"review before trusting: {observation!r}"
             )
 
-    return {
-        "summary": (data.get("summary") or "").strip(),
-        "safety": {
-            "has_events": has_events,
-            "events": events,
-            "no_events_text": "No safety events noted this interval.",
-        },
-        "medication_response": {"text": (data.get("medication_response") or {}).get("text", "").strip()},
-        "trajectory": {"text": (data.get("trajectory") or {}).get("text", "").strip()},
-        "validation_warnings": warnings,
-    }
+        insights.append({
+            "category": category,
+            "observation": observation,
+            "takeaway": takeaway,
+            "chip": chip,
+            "source_note_ids": source_note_ids,
+        })
+        seen_categories.add(category)
+
+    insights.sort(key=lambda i: CATEGORIES.index(i["category"]))
+
+    return {"insights": insights, "validation_warnings": warnings}

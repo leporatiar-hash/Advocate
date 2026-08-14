@@ -402,30 +402,16 @@ class RecentNote(BaseModel):
     reaffirmed_dates: List[date] = []
 
 
-class SafetyEvent(BaseModel):
-    # Named event_date, not date: a field literally named `date` on the same line as
-    # the `Optional[date]` type collides during Pydantic's annotation resolution and
-    # silently collapses the type to None-only — confirmed by a live 500 in testing.
-    event_date: Optional[date] = None  # None if the AI cited a date we couldn't verify
-    text: str
-    quote: Optional[str] = None
-
-
-class ClinicalSummarySafety(BaseModel):
-    has_events: bool
-    events: List[SafetyEvent]
-    no_events_text: str
-
-
-class ClinicalSummaryProse(BaseModel):
-    text: str
+class InsightUnit(BaseModel):
+    category: str  # one of services.synthesis.CATEGORIES, fixed display order
+    observation: str
+    takeaway: str
+    chip: str  # "watch" | "steady" | "low_data"
+    source_note_ids: List[str] = []  # dates (YYYY-MM-DD) — same addressing recent notes already use
 
 
 class ClinicalSummary(BaseModel):
-    summary: str
-    safety: ClinicalSummarySafety
-    medication_response: ClinicalSummaryProse
-    trajectory: ClinicalSummaryProse
+    insights: List[InsightUnit]
     generated_at: datetime
     window_days: int
     validation_warnings: List[str] = []
@@ -454,6 +440,7 @@ class TrajectoryDay(BaseModel):
     severity: Optional[float] = None
     episode: bool
     smoked: bool
+    logged: bool
 
 
 class PortalTrajectory(BaseModel):

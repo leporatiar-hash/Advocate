@@ -83,6 +83,15 @@ input[type="range"]::-moz-range-thumb {
 .clinician-portal .cp-tabular {
   font-variant-numeric: tabular-nums;
 }
+/* Brief flash when an insight's "N notes" affordance scrolls a raw note into
+   view — confirms which note the click actually revealed. */
+.clinician-portal .note-highlight {
+  animation: cp-note-highlight-flash 1.6s ease-out;
+}
+@keyframes cp-note-highlight-flash {
+  0% { background-color: var(--cp-teal-light); border-color: var(--cp-teal); }
+  100% { background-color: #fff; }
+}
 
 /* NProgress route transition bar — must be after nprogress.css in bundle */
 #nprogress .bar {

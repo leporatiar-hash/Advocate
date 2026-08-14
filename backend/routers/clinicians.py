@@ -151,7 +151,7 @@ def get_clinician_portal(
     }
 
     trajectory_days = build_trajectory(agg["logs"], agg["window"]["start"], agg["window"]["end"])
-    top_flag = build_top_flag(agg["observation_periods"])
+    top_flag = build_top_flag(agg["observation_periods"], agg["symptom_stats"])
 
     med_adherence = [
         {
@@ -175,20 +175,6 @@ def get_clinician_portal(
         .all()
     )
     notable_periods = [p for p in reversed(group_observation_periods(all_logs)) if p["notes"]]
-    recent_notes = [
-        {
-            "date": p["date"],
-            "text": p["notes"],
-            "badges": _note_badges(p),
-            "reaffirmed_dates": p["repeated_dates"],
-        }
-        for p in notable_periods[:5]
-    ]
-
-    active_medications = [f"{m.name} {m.dose}".strip() for m in agg["medications"]]
-
-    sleep_days_logged = len(agg["sleep_vals"])
-    sleep_hours = agg["avg_sleep"] if sleep_days_logged >= SLEEP_DATA_FLOOR else None
 
     # Read-only cache lookup — never generates. The synthesis is produced exclusively
     # by scripts/generate_synthesis.py so a portal page load never calls OpenAI.
@@ -204,6 +190,37 @@ def get_clinician_portal(
             "generated_at": synthesis_row.generated_at,
             "window_days": synthesis_row.window_days,
         }
+
+    # Every insight's "N notes" affordance has to actually reveal its source, so
+    # any date an insight cites must appear in recent_notes even if it falls
+    # outside the usual top-5-most-recent — otherwise source-linking would
+    # silently break the moment there are more than 5 note-bearing days in a
+    # patient's history, which defeats the entire trust mechanism.
+    cited_dates = {
+        note_id
+        for insight in (clinical_summary or {}).get("insights", [])
+        for note_id in insight.get("source_note_ids", [])
+    }
+    recent_periods = notable_periods[:5]
+    recent_dates = {p["date"].isoformat() for p in recent_periods}
+    cited_periods = [
+        p for p in notable_periods
+        if p["date"].isoformat() in cited_dates and p["date"].isoformat() not in recent_dates
+    ]
+    recent_notes = [
+        {
+            "date": p["date"],
+            "text": p["notes"],
+            "badges": _note_badges(p),
+            "reaffirmed_dates": p["repeated_dates"],
+        }
+        for p in recent_periods + cited_periods
+    ]
+
+    active_medications = [f"{m.name} {m.dose}".strip() for m in agg["medications"]]
+
+    sleep_days_logged = len(agg["sleep_vals"])
+    sleep_hours = agg["avg_sleep"] if sleep_days_logged >= SLEEP_DATA_FLOOR else None
 
     return {
         "window": agg["window"],
