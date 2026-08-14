@@ -4,7 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../AuthProvider";
 
-export function ClinicianHeader({ patientName, backHref }: { patientName?: string; backHref?: string }) {
+export function ClinicianHeader({
+  patientName,
+  backHref,
+  actions,
+}: {
+  patientName?: string;
+  backHref?: string;
+  actions?: React.ReactNode;
+}) {
   const router = useRouter();
   const { logout } = useAuth();
 
@@ -31,9 +39,12 @@ export function ClinicianHeader({ patientName, backHref }: { patientName?: strin
           {patientName && <p className="text-white/70 text-xs truncate">{patientName}</p>}
         </div>
       </div>
-      <button onClick={handleLogout} className="text-white/80 hover:text-white text-sm flex-shrink-0 transition-colors">
-        Sign out
-      </button>
+      <div className="flex items-center gap-4 flex-shrink-0">
+        {actions}
+        <button onClick={handleLogout} className="text-white/80 hover:text-white text-sm flex-shrink-0 transition-colors">
+          Sign out
+        </button>
+      </div>
     </header>
   );
 }
