@@ -15,7 +15,7 @@ function metricLabel(metric: string): string {
 export function FlagList({ flags }: { flags: PortalFlag[] }) {
   return (
     <div className="rounded-2xl p-5" style={{ background: "var(--cp-flag-bg)", border: `1px solid var(--cp-flag-border)` }}>
-      <h2 className="text-base font-bold" style={{ color: "var(--cp-text)" }}>Flagged This Period</h2>
+      <h2 className="text-base font-bold" style={{ color: "var(--cp-text)" }}>Metric Thresholds</h2>
       <p className="text-xs italic mt-1 mb-4" style={{ color: "var(--cp-text-muted)" }}>
         Deterministic flags computed from logged severity and frequency — placed after the summary so they don&apos;t color the read.
       </p>

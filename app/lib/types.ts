@@ -299,6 +299,9 @@ export interface SymptomFrequencyEntry {
   symptom: string;
   days_present: number;
   avg_severity: number | null;
+  prev_avg_severity: number | null;
+  direction: "better" | "worse" | "steady";
+  low_n: boolean;
 }
 
 export interface MedAdherenceEntry {
@@ -335,12 +338,46 @@ export interface ClinicalSummary {
   validation_warnings: string[];
 }
 
+export interface TrendStat {
+  value: number | null;
+  prev: number | null;
+  direction: "up" | "down" | "steady";
+}
+
+export interface GlanceStats {
+  adherence: TrendStat;
+  flagged_episodes: TrendStat;
+  symptom_load: TrendStat;
+  days_logged: { value: number; total: number };
+}
+
+export interface TrajectoryDay {
+  date: string;
+  severity: number | null;
+  episode: boolean;
+  smoked: boolean;
+}
+
+export interface PortalTrajectory {
+  days: TrajectoryDay[];
+}
+
+export interface TopFlag {
+  date: string;
+  text: string;
+  quote: string | null;
+  note_id: string | null;
+}
+
 export interface ClinicianPortalResponse {
   window: PortalWindow;
   patient: { name: string; age: number | null; active_medications: string[] };
   clinical_summary: ClinicalSummary | null;
   stats: PortalStats;
   flags: PortalFlag[];
+  glance_stats: GlanceStats;
+  trajectory: PortalTrajectory;
+  top_flag: TopFlag | null;
   symptom_frequency: SymptomFrequencyEntry[];
   med_adherence: MedAdherenceEntry[];
   recent_notes: RecentNote[];

@@ -1,4 +1,4 @@
-from datetime import date as date_type, datetime
+from datetime import date as date_type, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,7 +8,17 @@ from database import get_db
 import models
 import schemas
 from auth import get_current_clinician
-from services.aggregation import build_patient_aggregate, build_flags, group_observation_periods, SLEEP_DATA_FLOOR
+from services.aggregation import (
+    build_patient_aggregate,
+    build_flags,
+    build_trajectory,
+    build_top_flag,
+    group_observation_periods,
+    raw_trend,
+    symptom_trend,
+    SLEEP_DATA_FLOOR,
+    TREND_LOW_N_DAYS,
+)
 
 router = APIRouter()
 
@@ -85,25 +95,63 @@ def get_clinician_portal(
     agg["window"]["days"] = window_days
     flags = build_flags(agg)
 
-    total_symptom_severity_sum = sum(s["severity_sum"] for s in agg["symptom_stats"].values())
-    total_symptom_severity_count = sum(s["severity_count"] for s in agg["symptom_stats"].values())
-    avg_symptom_severity = (
-        round(total_symptom_severity_sum / total_symptom_severity_count, 1)
-        if total_symptom_severity_count
-        else None
-    )
+    # Immediately-preceding window of the same length, purely for period-over-period
+    # deltas. Never surfaced to the client directly, only diffed against.
+    prior_end = agg["window"]["start"] - timedelta(days=1)
+    prior_start = prior_end - timedelta(days=window_days)
+    prior_agg = build_patient_aggregate(patient_id, db=db, start_date=prior_start, end_date=prior_end)
+
+    def _avg_symptom_severity(a: dict) -> Optional[float]:
+        total_sum = sum(s["severity_sum"] for s in a["symptom_stats"].values())
+        total_count = sum(s["severity_count"] for s in a["symptom_stats"].values())
+        return round(total_sum / total_count, 1) if total_count else None
+
+    avg_symptom_severity = _avg_symptom_severity(agg)
+    prior_avg_symptom_severity = _avg_symptom_severity(prior_agg)
 
     days_in_window = agg["window"]["days"]
     log_frequency_pct = round(agg["days_logged"] / days_in_window * 100, 1) if days_in_window else 0
 
-    symptom_frequency = sorted(
-        (
-            {"symptom": name, "days_present": stat["days_present"], "avg_severity": stat["avg_severity"]}
-            for name, stat in agg["symptom_stats"].items()
-        ),
-        key=lambda s: (s["days_present"], s["avg_severity"] or 0),
+    symptom_frequency = []
+    for name, stat in sorted(
+        agg["symptom_stats"].items(),
+        key=lambda kv: (kv[1]["days_present"], kv[1]["avg_severity"] or 0),
         reverse=True,
-    )
+    ):
+        low_n = stat["days_present"] < TREND_LOW_N_DAYS
+        prev_stat = prior_agg["symptom_stats"].get(name)
+        prev_avg = prev_stat["avg_severity"] if prev_stat else None
+        symptom_frequency.append({
+            "symptom": name,
+            "days_present": stat["days_present"],
+            "avg_severity": stat["avg_severity"],
+            "prev_avg_severity": prev_avg,
+            "direction": symptom_trend(stat["avg_severity"], prev_avg, low_n=low_n),
+            "low_n": low_n,
+        })
+
+    prior_adherence_pct = prior_agg["adherence_totals"]["pct"] if prior_agg["adherence_totals"]["expected"] else None
+    glance_stats = {
+        "adherence": {
+            "value": agg["adherence_totals"]["pct"],
+            "prev": prior_adherence_pct,
+            "direction": raw_trend(agg["adherence_totals"]["pct"], prior_adherence_pct, steady_threshold=5),
+        },
+        "flagged_episodes": {
+            "value": agg["episode_count"],
+            "prev": prior_agg["episode_count"],
+            "direction": raw_trend(agg["episode_count"], prior_agg["episode_count"], steady_threshold=0.5),
+        },
+        "symptom_load": {
+            "value": avg_symptom_severity,
+            "prev": prior_avg_symptom_severity,
+            "direction": raw_trend(avg_symptom_severity, prior_avg_symptom_severity, steady_threshold=0.5),
+        },
+        "days_logged": {"value": agg["days_logged"], "total": days_in_window},
+    }
+
+    trajectory_days = build_trajectory(agg["logs"], agg["window"]["start"], agg["window"]["end"])
+    top_flag = build_top_flag(agg["observation_periods"])
 
     med_adherence = [
         {
@@ -179,6 +227,9 @@ def get_clinician_portal(
             "med_adherence": {"pct": agg["adherence_totals"]["pct"]},
         },
         "flags": flags,
+        "glance_stats": glance_stats,
+        "trajectory": {"days": trajectory_days},
+        "top_flag": top_flag,
         "symptom_frequency": symptom_frequency,
         "med_adherence": med_adherence,
         "recent_notes": recent_notes,

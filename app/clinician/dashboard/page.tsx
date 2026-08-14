@@ -11,6 +11,9 @@ import { SymptomFrequencyBars } from "../../components/clinician/SymptomFrequenc
 import { MedAdherenceBars } from "../../components/clinician/MedAdherenceBars";
 import { RecentNotes } from "../../components/clinician/RecentNotes";
 import { ClinicalSummary } from "../../components/clinician/ClinicalSummary";
+import { GlanceLayer } from "../../components/clinician/GlanceLayer";
+import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
+import { RankedFlag } from "../../components/clinician/RankedFlag";
 import type { ClinicianPortalResponse } from "../../lib/types";
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -69,7 +72,7 @@ function DashboardContent() {
     );
   }
 
-  const { patient, clinical_summary, stats, flags, symptom_frequency, med_adherence, recent_notes, window } = portal;
+  const { patient, clinical_summary, stats, flags, symptom_frequency, med_adherence, recent_notes, window, trajectory, top_flag } = portal;
 
   return (
     <div className="min-h-screen pb-10">
@@ -96,6 +99,9 @@ function DashboardContent() {
             Last {window.days} days
           </p>
         </div>
+
+        {/* Glance layer — the 5-second read; everything below is for the clinician who wants more */}
+        <GlanceLayer portal={portal} />
 
         {/* Clinical Summary — the hero, synthesized from caregiver notes */}
         <ClinicalSummary data={clinical_summary} patientId={patientId} />
@@ -143,6 +149,12 @@ function DashboardContent() {
             {/* Flags */}
             <FlagList flags={flags} />
 
+            {/* How the month moved */}
+            <div>
+              <SectionTitle>How the Month Moved</SectionTitle>
+              <TrajectoryStrip days={trajectory.days} />
+            </div>
+
             {/* Symptom frequency */}
             <div>
               <SectionTitle>Symptom Frequency</SectionTitle>
@@ -157,6 +169,12 @@ function DashboardContent() {
               <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
                 <MedAdherenceBars data={med_adherence} />
               </div>
+            </div>
+
+            {/* Ranked flag — the single highest-severity note, red reserved for this only */}
+            <div>
+              <SectionTitle>Flagged This Period</SectionTitle>
+              <RankedFlag topFlag={top_flag} patientId={patientId} />
             </div>
           </div>
         </div>

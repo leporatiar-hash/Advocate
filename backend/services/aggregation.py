@@ -149,6 +149,7 @@ def build_patient_aggregate(
     side_effect_counts: dict = defaultdict(lambda: defaultdict(int))
     lifestyle_totals: dict = defaultdict(int)
     log_entries = []
+    episode_count = 0
 
     for log in logs:
         if log.sleep_hours is not None:
@@ -157,6 +158,8 @@ def build_patient_aggregate(
             mood_vals.append(log.mood_score)
         if log.water_intake_oz is not None:
             water_vals.append(log.water_intake_oz)
+        if (log.episode or {}).get("occurred"):
+            episode_count += 1
 
         for s in (log.symptoms or []):
             name = s["name"]
@@ -221,6 +224,7 @@ def build_patient_aggregate(
         "medications": medications,
         "days_logged": days_logged,
         "total_logs": len(logs),
+        "episode_count": episode_count,
         "adherence": adherence,
         "adherence_totals": adherence_totals,
         "symptom_stats": dict(symptom_stats),
@@ -324,3 +328,86 @@ def build_flags(agg: dict) -> list:
     order = {"high": 0, "moderate": 1, "low": 2}
     flags.sort(key=lambda f: order[f["severity"]])
     return flags
+
+
+# Below this many logged days for a given symptom, a period-over-period comparison
+# is noise, not a trend — see build_symptom_trend below.
+TREND_LOW_N_DAYS = 3
+
+
+def raw_trend(current: Optional[float], prev: Optional[float], *, steady_threshold: float) -> str:
+    """Numeric up/down/steady with no clinical meaning attached — for header
+    stats where the frontend, not this function, decides what "up" means for a
+    given metric (e.g. adherence up is good, symptom load up is bad)."""
+    if current is None or prev is None:
+        return "steady"
+    diff = current - prev
+    if abs(diff) < steady_threshold:
+        return "steady"
+    return "up" if diff > 0 else "down"
+
+
+def symptom_trend(current: Optional[float], prev: Optional[float], *, low_n: bool, steady_threshold: float = 0.5) -> str:
+    """Clinical-meaning trend for a single symptom's average severity: higher
+    severity is always worse, regardless of which symptom it is. Forced steady
+    when there isn't enough data to trust a delta."""
+    if low_n or current is None or prev is None:
+        return "steady"
+    diff = current - prev
+    if abs(diff) < steady_threshold:
+        return "steady"
+    return "worse" if diff > 0 else "better"
+
+
+def build_trajectory(logs, start_date: date_type, end_date: date_type) -> list:
+    """One row per calendar day in the window: average symptom severity that day
+    (None if nothing was logged), whether an episode occurred, and whether the
+    caregiver flagged smoking that day. Gaps (no log that day) render as nulls
+    rather than being skipped, so the strip's day spacing stays uniform."""
+    by_date = {}
+    for log in logs:
+        severities = [s.get("severity") for s in (log.symptoms or []) if s.get("severity") is not None]
+        by_date[log.date] = {
+            "severity": round(sum(severities) / len(severities), 1) if severities else None,
+            "episode": bool((log.episode or {}).get("occurred")),
+            "smoked": bool((log.lifestyle or {}).get("smoked")),
+        }
+
+    days = []
+    d = start_date
+    while d <= end_date:
+        entry = by_date.get(d, {"severity": None, "episode": False, "smoked": False})
+        days.append({"date": d, **entry})
+        d += timedelta(days=1)
+    return days
+
+
+def build_top_flag(observation_periods: list) -> Optional[dict]:
+    """The single highest-severity logged symptom this period, deterministically
+    picked (no LLM) — the one note the clinician should read if they read nothing
+    else. Returns None if nothing in the window reached high severity."""
+    best_period = None
+    best_symptom = None
+    for period in observation_periods:
+        symptoms = [s for s in (period.get("symptoms") or []) if s.get("severity") is not None]
+        if not symptoms:
+            continue
+        top = max(symptoms, key=lambda s: s["severity"])
+        # >= , not >: on a tie, the more recent occurrence wins. Periods here are
+        # ascending by date, so the last equally-severe hit overwrites earlier
+        # ones — a peak severity repeated weeks apart should surface the recent
+        # one, since that's the one still actionable at the next visit.
+        if best_symptom is None or top["severity"] >= best_symptom["severity"]:
+            best_symptom = top
+            best_period = period
+
+    if not best_period or not best_symptom or best_symptom["severity"] < 8:
+        return None
+
+    date_str = best_period["date"].isoformat()
+    return {
+        "date": date_str,
+        "text": f"Highest-severity note this period: {best_symptom['name']} logged at {best_symptom['severity']}/10.",
+        "quote": best_period.get("notes"),
+        "note_id": date_str,
+    }

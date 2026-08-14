@@ -383,6 +383,9 @@ class SymptomFrequencyEntry(BaseModel):
     symptom: str
     days_present: int
     avg_severity: Optional[float] = None
+    prev_avg_severity: Optional[float] = None
+    direction: str = "steady"  # "better" | "worse" | "steady"
+    low_n: bool = False
 
 
 class MedAdherenceEntry(BaseModel):
@@ -428,12 +431,51 @@ class ClinicalSummary(BaseModel):
     validation_warnings: List[str] = []
 
 
+class TrendStat(BaseModel):
+    value: Optional[float] = None
+    prev: Optional[float] = None
+    direction: str  # "up" | "down" | "steady" — raw, no clinical meaning attached
+
+
+class DaysLoggedStat(BaseModel):
+    value: int
+    total: int
+
+
+class GlanceStats(BaseModel):
+    adherence: TrendStat
+    flagged_episodes: TrendStat
+    symptom_load: TrendStat
+    days_logged: DaysLoggedStat
+
+
+class TrajectoryDay(BaseModel):
+    date: date
+    severity: Optional[float] = None
+    episode: bool
+    smoked: bool
+
+
+class PortalTrajectory(BaseModel):
+    days: List[TrajectoryDay]
+
+
+class TopFlag(BaseModel):
+    date: date
+    text: str
+    quote: Optional[str] = None
+    note_id: Optional[str] = None
+
+
 class ClinicianPortalResponse(BaseModel):
     window: PortalWindow
     patient: PortalPatient
     clinical_summary: Optional[ClinicalSummary] = None
     stats: PortalStats
     flags: List[PortalFlag]
+    glance_stats: GlanceStats
+    trajectory: PortalTrajectory
+    top_flag: Optional[TopFlag] = None
     symptom_frequency: List[SymptomFrequencyEntry]
     med_adherence: List[MedAdherenceEntry]
     recent_notes: List[RecentNote]
