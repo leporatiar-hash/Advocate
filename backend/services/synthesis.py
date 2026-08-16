@@ -53,12 +53,19 @@ SYSTEM_PROMPT = (
     "6. Every date you cite in source_note_ids must be exactly one of the dates "
     "provided in the input. Never invent, estimate, or shift a date.\n"
     "7. Do not speculate beyond what the notes actually say.\n"
-    "8. For what_went_well: surface only positive caregiver-logged observations "
-    "(for example, asked to join an activity, a coping strategy that helped, a "
-    "steady stretch of days). Attribute each to the exact date it was logged on. "
-    "Never assert clinical improvement, recovery, or a positive trend. Present the "
-    "observation only, do not diagnose or recommend. If nothing qualifies, return "
-    "an empty array. Same no-counts, no-em-dash, under-20-words rules apply.\n"
+    "8. For what_went_well: surface positive caregiver-logged engagement — an "
+    "activity, outing, social contact, or coping strategy the patient took part "
+    "in (for example, asked to join a day program, went surfing, a walk, a "
+    "coping strategy that helped, a steady stretch of days). Surface the "
+    "engagement itself even if the same note also describes a difficult moment "
+    "or an episode elsewhere in the account — being out and engaged is worth "
+    "noting on its own, do not withhold it just because something else in the "
+    "note was hard. Attribute each to the exact date it was logged on. Never "
+    "assert clinical improvement, recovery, or a positive trend, and never claim "
+    "the engagement caused or prevented anything — state only that it happened. "
+    "Present the observation only, do not diagnose or recommend. If nothing "
+    "qualifies, return an empty array. Same no-counts, no-em-dash, "
+    "under-20-words rules apply.\n"
     "Return ONLY valid JSON matching the schema described in the user prompt — no "
     "markdown fences, no extra text."
 )
@@ -142,7 +149,8 @@ Rules for insights:
 - "source_note_ids" lists the specific date(s), from the valid list above, that this observation is actually drawn from.
 
 Rules for what_went_well:
-- Surface positive caregiver-logged observations only (asked to join an activity, a coping strategy that helped, a steady stretch of days, and similar). Never assert improvement, recovery, or a positive trend, only the observation itself.
+- Surface positive caregiver-logged engagement: an activity, outing, social contact, or coping strategy the patient took part in (asked to join a day program, went surfing, a walk, a coping strategy that helped, a steady stretch of days, and similar). Surface the engagement itself even if the same note also describes a difficult moment or an episode elsewhere in the account — do not withhold it just because something else in the note was hard.
+- Never assert improvement, recovery, or a positive trend, and never claim the engagement caused or prevented anything — state only that it happened.
 - "date" must be exactly one of the valid dates above.
 - If nothing in the notes qualifies as a positive observation, return an empty array. Do not invent one."""
 
