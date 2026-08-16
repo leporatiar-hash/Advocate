@@ -326,8 +326,14 @@ export interface InsightUnit {
   source_note_ids: string[];
 }
 
+export interface WhatWentWellItem {
+  observation: string;
+  date: string;
+}
+
 export interface ClinicalSummary {
   insights: InsightUnit[];
+  what_went_well: WhatWentWellItem[];
   generated_at: string;
   window_days: number;
   validation_warnings: string[];
@@ -356,6 +362,27 @@ export interface TrajectoryDay {
 
 export interface PortalTrajectory {
   days: TrajectoryDay[];
+}
+
+export interface TemporalBin {
+  start: string;
+  end: string;
+  label: string;
+  bin_size: "day" | "week" | "month";
+  color: "green" | "amber" | "red" | "neutral";
+  bin_sev: number | null;
+  has_episode: boolean;
+  readout: string | null;
+  logged_days: number;
+  scored_days: number;
+  notes: string[];
+}
+
+export interface TemporalResponse {
+  bins: TemporalBin[];
+  bin_size: "day" | "week" | "month";
+  total_logged_days: number;
+  not_enough_history: boolean;
 }
 
 export interface TopFlag {

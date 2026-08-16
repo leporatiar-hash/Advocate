@@ -16,6 +16,14 @@ _COUNT_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Soft check only, same reasoning as _COUNT_CLAIM_PATTERN above — flags a
+# what_went_well observation that reads as a clinical improvement/recovery
+# claim rather than a plain attributed observation, for human review.
+_IMPROVEMENT_CLAIM_PATTERN = re.compile(
+    r"\b(improv\w*|recover\w*|getting better|progress(?:ing|ed)?|on the mend)\b",
+    re.IGNORECASE,
+)
+
 # Fixed display order — insights render in this order regardless of what order
 # the model returns them in, and any category the model invents outside this
 # list is dropped.
@@ -45,6 +53,12 @@ SYSTEM_PROMPT = (
     "6. Every date you cite in source_note_ids must be exactly one of the dates "
     "provided in the input. Never invent, estimate, or shift a date.\n"
     "7. Do not speculate beyond what the notes actually say.\n"
+    "8. For what_went_well: surface only positive caregiver-logged observations "
+    "(for example, asked to join an activity, a coping strategy that helped, a "
+    "steady stretch of days). Attribute each to the exact date it was logged on. "
+    "Never assert clinical improvement, recovery, or a positive trend. Present the "
+    "observation only, do not diagnose or recommend. If nothing qualifies, return "
+    "an empty array. Same no-counts, no-em-dash, under-20-words rules apply.\n"
     "Return ONLY valid JSON matching the schema described in the user prompt — no "
     "markdown fences, no extra text."
 )
@@ -110,6 +124,12 @@ Produce a JSON object with exactly this shape:
       "chip": "one of: watch, steady, low_data",
       "source_note_ids": ["YYYY-MM-DD", "..."]
     }}
+  ],
+  "what_went_well": [
+    {{
+      "observation": "one short attributed positive observation, under 20 words, plain language, non-diagnostic",
+      "date": "YYYY-MM-DD, the exact date this was logged, from the valid list above"
+    }}
   ]
 }}
 
@@ -119,7 +139,12 @@ Rules for insights:
 - At most one insight per category.
 - "takeaway" must be an exact substring of "observation" so it can be bolded within it.
 - "chip" is "watch" if the observation describes something concerning or worth monitoring, "steady" if it describes a stable or unremarkable pattern, "low_data" if there is only sparse or single-instance evidence for it.
-- "source_note_ids" lists the specific date(s), from the valid list above, that this observation is actually drawn from."""
+- "source_note_ids" lists the specific date(s), from the valid list above, that this observation is actually drawn from.
+
+Rules for what_went_well:
+- Surface positive caregiver-logged observations only (asked to join an activity, a coping strategy that helped, a steady stretch of days, and similar). Never assert improvement, recovery, or a positive trend, only the observation itself.
+- "date" must be exactly one of the valid dates above.
+- If nothing in the notes qualifies as a positive observation, return an empty array. Do not invent one."""
 
     return SYSTEM_PROMPT, user_prompt
 
@@ -145,7 +170,7 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
     }
 
     if not periods:
-        return {"insights": [], "validation_warnings": []}
+        return {"insights": [], "what_went_well": [], "validation_warnings": []}
 
     system_prompt, user_prompt = build_synthesis_prompt(patient, periods, med_names)
 
@@ -218,4 +243,135 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
 
     insights.sort(key=lambda i: CATEGORIES.index(i["category"]))
 
-    return {"insights": insights, "validation_warnings": warnings}
+    what_went_well: list = []
+    for item in (data.get("what_went_well") or []):
+        observation = (item.get("observation") or "").strip()
+        if not observation:
+            continue
+
+        date_str = (item.get("date") or "").strip()
+        if date_str not in valid_dates:
+            warnings.append(
+                f"Dropped a what_went_well observation with an unverifiable date {date_str!r}: {observation!r}"
+            )
+            continue
+
+        if _COUNT_CLAIM_PATTERN.search(observation):
+            warnings.append(
+                f"what_went_well observation may contain a frequency/count claim the AI wrote itself — "
+                f"review before trusting: {observation!r}"
+            )
+        if _IMPROVEMENT_CLAIM_PATTERN.search(observation):
+            warnings.append(
+                f"what_went_well observation may assert improvement/recovery rather than a plain observation — "
+                f"review before trusting: {observation!r}"
+            )
+
+        what_went_well.append({"observation": observation, "date": date_str})
+
+    return {"insights": insights, "what_went_well": what_went_well, "validation_warnings": warnings}
+
+
+# ── Temporal Data bin readouts ───────────────────────────────────────────────
+# One call per bin-with-notes, made only by scripts/generate_synthesis.py —
+# never on the portal's GET path. note_severity rates the notes only; the
+# numeric metrics (scored_sev, has_episode) are never sent to the model and
+# never influence its rating — see services/aggregation.combine_bin_severity
+# for where those actually combine with note_severity server-side.
+TEMPORAL_SYSTEM_PROMPT = (
+    "You are a clinical documentation assistant. You read a caregiver's free-text "
+    "notes covering one time period (a day, week, or month) of a patient's care "
+    "log. You rate how concerning that period's notes sound and write one "
+    "plain-language line describing them, for a psychiatrist reviewing the case.\n\n"
+    "HARD RULES, no exceptions:\n"
+    "1. ATTRIBUTE, NEVER DIAGNOSE. Describe what the caregiver reported, never a "
+    "clinical conclusion. The caregiver observes; the clinician concludes.\n"
+    "2. Base note_severity ONLY on what the notes say. Do not infer beyond the "
+    "text.\n"
+    "3. readout is ONE short sentence, under 20 words, plain language, describing "
+    "this period from the notes. Attributed observation only, no diagnosis, no "
+    "recommendation, no claim of improvement or worsening trend.\n"
+    "4. NO EM DASHES. Use a period or comma instead.\n"
+    "5. Never use the words \"app\", \"diagnose\", \"recommend\", \"improving\", or "
+    "\"Witness\".\n"
+    "6. note_severity is a number from 0 to 10 (0 = notes show no concern, 10 = "
+    "notes show the highest concern), on the same scale the rest of this system "
+    "uses for symptom severity.\n"
+    "7. Do not speculate beyond what the notes actually say.\n"
+    "Return ONLY valid JSON matching the schema described in the user prompt — no "
+    "markdown fences, no extra text."
+)
+
+
+def build_temporal_bin_prompt(patient, bin_label: str, notes: list) -> tuple:
+    notes_text = "\n\n".join(f"- {n}" for n in notes)
+    user_prompt = f"""Caregiver notes for {patient.name} ({patient.diagnosis}) logged during this period ({bin_label}):
+
+{notes_text}
+
+Produce a JSON object with exactly this shape:
+{{
+  "note_severity": <number 0-10>,
+  "readout": "one short attributed sentence, under 20 words, plain language, non-diagnostic"
+}}"""
+    return TEMPORAL_SYSTEM_PROMPT, user_prompt
+
+
+def generate_bin_readout(patient, bin_label: str, notes: list, api_key: str, model: str = None) -> dict:
+    """One OpenAI call for one bin's notes. Returns the validated
+    {note_severity, readout, warnings} for that bin — never called for a bin
+    with no notes (see generate_temporal_readouts)."""
+    system_prompt, user_prompt = build_temporal_bin_prompt(patient, bin_label, notes)
+
+    client = OpenAI(api_key=api_key)
+    completion = client.chat.completions.create(
+        model=model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    raw = (completion.choices[0].message.content or "").strip()
+    data = json.loads(raw)
+
+    warnings: list = []
+
+    note_severity = data.get("note_severity")
+    try:
+        note_severity = float(note_severity)
+    except (TypeError, ValueError):
+        warnings.append(f"Bin {bin_label!r} returned a non-numeric note_severity {note_severity!r} — dropped.")
+        note_severity = None
+    if note_severity is not None and not (0 <= note_severity <= 10):
+        warnings.append(f"Bin {bin_label!r} returned out-of-range note_severity {note_severity!r} — clamped.")
+        note_severity = max(0.0, min(10.0, note_severity))
+
+    readout = (data.get("readout") or "").strip()
+    if _COUNT_CLAIM_PATTERN.search(readout):
+        warnings.append(
+            f"Readout for bin {bin_label!r} may contain a frequency/count claim the AI wrote itself — "
+            f"review before trusting: {readout!r}"
+        )
+
+    return {"note_severity": note_severity, "readout": readout or None, "warnings": warnings}
+
+
+def generate_temporal_readouts(patient, bins: list, api_key: str, model: str = None) -> dict:
+    """Calls generate_bin_readout once per bin that has notes. Returns a dict
+    keyed by each bin's start-date isoformat -> {note_severity, readout},
+    plus the pooled validation_warnings — the shape scripts/generate_synthesis.py
+    caches under content["temporal_readouts"]. Bins with no notes are skipped
+    entirely (no call, note_severity null, no readout), per spec."""
+    readouts: dict = {}
+    warnings: list = []
+    for b in bins:
+        if not b["notes"]:
+            continue
+        result = generate_bin_readout(patient, b["label"], b["notes"], api_key, model)
+        warnings.extend(result["warnings"])
+        readouts[b["start"].isoformat()] = {
+            "note_severity": result["note_severity"],
+            "readout": result["readout"],
+        }
+    return {"temporal_readouts": readouts, "validation_warnings": warnings}

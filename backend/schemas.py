@@ -410,8 +410,14 @@ class InsightUnit(BaseModel):
     source_note_ids: List[str] = []  # dates (YYYY-MM-DD) — same addressing recent notes already use
 
 
+class WhatWentWellItem(BaseModel):
+    observation: str
+    date: str  # YYYY-MM-DD, the log date this was drawn from
+
+
 class ClinicalSummary(BaseModel):
     insights: List[InsightUnit]
+    what_went_well: List[WhatWentWellItem] = []
     generated_at: datetime
     window_days: int
     validation_warnings: List[str] = []
@@ -445,6 +451,29 @@ class TrajectoryDay(BaseModel):
 
 class PortalTrajectory(BaseModel):
     days: List[TrajectoryDay]
+
+
+# ── Temporal Data (adaptive multi-month trajectory) ──────────────────────────
+
+class TemporalBin(BaseModel):
+    start: date
+    end: date
+    label: str
+    bin_size: str  # "day" | "week" | "month"
+    color: str      # "green" | "amber" | "red" | "neutral"
+    bin_sev: Optional[float] = None
+    has_episode: bool
+    readout: Optional[str] = None
+    logged_days: int
+    scored_days: int
+    notes: List[str] = []  # raw note texts in this bin, for drill-in
+
+
+class TemporalResponse(BaseModel):
+    bins: List[TemporalBin]
+    bin_size: str  # "day" | "week" | "month" — the whole series' bin size
+    total_logged_days: int
+    not_enough_history: bool
 
 
 class TopFlag(BaseModel):

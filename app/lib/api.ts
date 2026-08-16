@@ -191,6 +191,8 @@ export const api = {
   getClinicianPatients: () => request("/clinicians/patients"),
   getClinicianPortal: (patientId: number, windowDays = 30) =>
     request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
+  getClinicianTemporal: (patientId: number) =>
+    request(`/clinicians/patient/${patientId}/temporal`),
   getClinicianLog: (patientId: number, dateStr: string) =>
     request(`/clinicians/patient/${patientId}/log/${dateStr}`),
 };

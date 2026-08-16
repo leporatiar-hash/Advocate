@@ -16,14 +16,14 @@ write the cached synthesis into — local for testing, prod for the real thing.
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal
 import models
-from services.aggregation import build_patient_aggregate
-from services.synthesis import generate_synthesis
+from services.aggregation import build_patient_aggregate, build_temporal_bins, TEMPORAL_WINDOW_DAYS
+from services.synthesis import generate_synthesis, generate_temporal_readouts
 
 PATIENT_ID = int(os.getenv("SEED_PATIENT_ID", "0"))
 WINDOW_DAYS = int(os.getenv("SYNTHESIS_WINDOW_DAYS", "30"))
@@ -48,6 +48,25 @@ def main():
 
         agg = build_patient_aggregate(PATIENT_ID, window_days=WINDOW_DAYS, db=db)
         content = generate_synthesis(patient, agg, db, api_key)
+
+        # Temporal Data bin readouts — same 12-month window the /temporal
+        # endpoint queries, computed here (not on the GET path) since it's an
+        # OpenAI call per bin-with-notes.
+        today = datetime.now().date()
+        temporal_logs = (
+            db.query(models.DailyLog)
+            .filter(
+                models.DailyLog.patient_id == PATIENT_ID,
+                models.DailyLog.date >= today - timedelta(days=TEMPORAL_WINDOW_DAYS),
+                models.DailyLog.date <= today,
+            )
+            .order_by(models.DailyLog.date.asc())
+            .all()
+        )
+        temporal_bins = build_temporal_bins(temporal_logs)
+        temporal_result = generate_temporal_readouts(patient, temporal_bins, api_key)
+        content["temporal_readouts"] = temporal_result["temporal_readouts"]
+        content["validation_warnings"] = content["validation_warnings"] + temporal_result["validation_warnings"]
 
         if content["validation_warnings"]:
             print("VALIDATION WARNINGS — review before trusting this synthesis:")

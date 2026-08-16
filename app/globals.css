@@ -69,6 +69,8 @@ input[type="range"]::-moz-range-thumb {
   --cp-amber-light: #FEF3C7;
   --cp-red: #B91C1C;
   --cp-red-light: #FEE2E2;
+  --cp-green: #15803D;
+  --cp-green-light: #F0FDF4;
   --cp-text: #374151;
   --cp-text-muted: #6B7280;
   --cp-bg: #FAFAF7;

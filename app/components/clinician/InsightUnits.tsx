@@ -1,11 +1,5 @@
 import type { InsightUnit } from "../../lib/types";
 
-const CHIP_CONFIG: Record<InsightUnit["chip"], { label: string; color: string; bg: string }> = {
-  watch: { label: "watch", color: "var(--cp-amber)", bg: "var(--cp-amber-light)" },
-  steady: { label: "steady", color: "var(--cp-text-muted)", bg: "#F3F4F6" },
-  low_data: { label: "low data", color: "var(--cp-text-muted)", bg: "#F3F4F6" },
-};
-
 // takeaway is required to be an exact substring of observation (enforced in
 // services/synthesis.py) — if it somehow isn't, fall back to the plain
 // observation rather than rendering nothing.
@@ -52,7 +46,6 @@ export function InsightUnits({
       </p>
       <div className="divide-y" style={{ borderColor: "rgba(15,107,102,0.15)" }}>
         {insights.map((insight) => {
-          const chip = CHIP_CONFIG[insight.chip] ?? CHIP_CONFIG.steady;
           const noteCount = insight.source_note_ids.length;
           return (
             <div
@@ -69,12 +62,6 @@ export function InsightUnits({
                 {withBoldedTakeaway(insight.observation, insight.takeaway)}
               </p>
               <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
-                <span
-                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
-                  style={{ background: chip.bg, color: chip.color }}
-                >
-                  {chip.label}
-                </span>
                 {noteCount > 0 && (
                   <button
                     type="button"

@@ -335,6 +335,174 @@ def build_flags(agg: dict) -> list:
 TREND_LOW_N_DAYS = 3
 
 
+# ── Temporal Data (adaptive multi-month trajectory) ─────────────────────────────
+# Bin size is chosen from the span between the patient's first and last log inside
+# the temporal window (up to 12 months) — not from the window length itself, so a
+# patient with one cluster of history in an otherwise-empty year still gets a
+# readable ribbon instead of hundreds of empty daily bins.
+SPAN_DAY_MAX = 35      # days; span at or under this uses daily bins
+SPAN_WEEK_MAX = 182    # days (~6 months); span at or under this uses weekly bins
+                       # beyond SPAN_WEEK_MAX, bins are monthly
+
+# 0-10 scale severity color thresholds — must match app/lib/clinicianSeverity.ts
+# so a bin's color means the same thing on both sides of the API.
+SEV_GREEN_MAX = 2.9
+SEV_AMBER_MAX = 5.9
+RED_FORCE = 6.0        # a bin with any episode is floored to at least this severity
+
+# Below this many *scored* days in a bin, the scored average is noise and is
+# excluded from the bin's severity — notes and episodes still count regardless.
+SCORED_FLOOR_DAY = 1
+SCORED_FLOOR_WEEK = 3
+SCORED_FLOOR_MONTH = 10
+SCORED_FLOOR_BY_BIN_SIZE = {
+    "day": SCORED_FLOOR_DAY,
+    "week": SCORED_FLOOR_WEEK,
+    "month": SCORED_FLOOR_MONTH,
+}
+
+# Below this many total logged days in the temporal window, a trend read is
+# noise — the strip still shows daily markers but with a quiet "not enough
+# history" line instead of trend framing.
+NOT_ENOUGH_HISTORY_DAYS = 14
+
+# How far back the temporal window looks, regardless of the rest of the
+# page's window toggle.
+TEMPORAL_WINDOW_DAYS = 365
+
+
+def compute_day_severity(log) -> Optional[float]:
+    """Single per-day severity number: the mean of that day's logged symptom
+    severities, or None if nothing was scored that day. This is the ONE
+    per-day severity function — both the existing daily trajectory (build_trajectory)
+    and the adaptive temporal bins reuse it rather than each computing their own."""
+    severities = [s.get("severity") for s in (log.symptoms or []) if s.get("severity") is not None]
+    return round(sum(severities) / len(severities), 1) if severities else None
+
+
+def _bin_size_for_span(span_days: int) -> str:
+    if span_days <= SPAN_DAY_MAX:
+        return "day"
+    if span_days <= SPAN_WEEK_MAX:
+        return "week"
+    return "month"
+
+
+def _month_add(d: date_type, months: int) -> date_type:
+    total = d.month - 1 + months
+    year = d.year + total // 12
+    month = total % 12 + 1
+    return date_type(year, month, 1)
+
+
+def _bin_label(start: date_type, bin_size: str, first_year: int) -> str:
+    if bin_size == "day":
+        return f"{start.strftime('%b')} {start.day}"
+    if bin_size == "week":
+        return f"{start.strftime('%b')} {start.day}"
+    # month
+    return start.strftime("%b") if start.year == first_year else f"{start.strftime('%b')} '{start.strftime('%y')}"
+
+
+def _bin_ranges(first_log: date_type, last_log: date_type, bin_size: str) -> list:
+    """(start, end, label) for each bin, first-log-anchored, covering through
+    the bin that contains last_log. Never produces a bin before first_log."""
+    ranges = []
+    first_year = first_log.year
+    if bin_size == "day":
+        d = first_log
+        while d <= last_log:
+            ranges.append((d, d, _bin_label(d, bin_size, first_year)))
+            d += timedelta(days=1)
+    elif bin_size == "week":
+        start = first_log
+        while start <= last_log:
+            end = start + timedelta(days=6)
+            ranges.append((start, end, _bin_label(start, bin_size, first_year)))
+            start = end + timedelta(days=1)
+    else:  # month
+        start = date_type(first_log.year, first_log.month, 1)
+        while start <= last_log:
+            next_start = _month_add(start, 1)
+            end = next_start - timedelta(days=1)
+            ranges.append((start, end, _bin_label(start, bin_size, first_year)))
+            start = next_start
+    return ranges
+
+
+def build_temporal_bins(logs: list) -> list:
+    """Deterministic adaptive-bin breakdown of the given logs (already
+    date-ascending, already scoped to the temporal window by the caller) — no
+    LLM, no color. Bin size follows the span between the first and last logged
+    day; no leading bins render before the first log, and gap bins with no
+    logs at all inside that range still appear (neutral, filled in downstream).
+
+    `notes` is deduplicated through the same same_as_yesterday collapsing as
+    everything else (group_observation_periods), so a reaffirmed note doesn't
+    get passed to the LLM step multiple times."""
+    logged_dates = sorted({log.date for log in logs})
+    if not logged_dates:
+        return []
+    first_log, last_log = logged_dates[0], logged_dates[-1]
+    span_days = (last_log - first_log).days + 1
+    bin_size = _bin_size_for_span(span_days)
+
+    day_sev_by_date = {log.date: compute_day_severity(log) for log in logs}
+    episode_by_date = {log.date: bool((log.episode or {}).get("occurred")) for log in logs}
+    notes_by_date = {p["date"]: p["notes"] for p in group_observation_periods(logs) if p["notes"]}
+    logged_date_set = set(logged_dates)
+
+    bins = []
+    for start, end, label in _bin_ranges(first_log, last_log, bin_size):
+        bin_dates = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        bin_logged_dates = [d for d in bin_dates if d in logged_date_set]
+        scored_vals = [day_sev_by_date[d] for d in bin_logged_dates if day_sev_by_date.get(d) is not None]
+
+        bins.append({
+            "start": start,
+            "end": end,
+            "label": label,
+            "bin_size": bin_size,
+            "logged_days": len(bin_logged_dates),
+            "scored_days": len(scored_vals),
+            "scored_sev": round(sum(scored_vals) / len(scored_vals), 2) if scored_vals else None,
+            "has_episode": any(episode_by_date.get(d, False) for d in bin_logged_dates),
+            "notes": [notes_by_date[d] for d in bin_dates if d in notes_by_date],
+        })
+    return bins
+
+
+def combine_bin_severity(bin_data: dict, note_severity: Optional[float]) -> tuple:
+    """Deterministic combine step: scored severity only counts once the bin has
+    enough scored days for its bin size; a note's severity always counts; any
+    episode in the bin floors the bin to at least RED_FORCE. Returns
+    (bin_sev, color). The LLM never sets color directly — it only ever produces
+    note_severity and the readout text that this function's caller attaches."""
+    components = []
+
+    floor = SCORED_FLOOR_BY_BIN_SIZE[bin_data["bin_size"]]
+    if bin_data["scored_days"] >= floor and bin_data["scored_sev"] is not None:
+        components.append(bin_data["scored_sev"])
+    if note_severity is not None:
+        components.append(note_severity)
+
+    bin_sev = max(components) if components else None
+
+    if bin_data["has_episode"]:
+        bin_sev = max(bin_sev or 0, RED_FORCE)
+
+    if bin_sev is None:
+        color = "neutral"
+    elif bin_sev <= SEV_GREEN_MAX:
+        color = "green"
+    elif bin_sev <= SEV_AMBER_MAX:
+        color = "amber"
+    else:
+        color = "red"
+
+    return bin_sev, color
+
+
 def raw_trend(current: Optional[float], prev: Optional[float], *, steady_threshold: float) -> str:
     """Numeric up/down/steady with no clinical meaning attached — for header
     stats where the frontend, not this function, decides what "up" means for a
@@ -371,9 +539,8 @@ def build_trajectory(logs, start_date: date_type, end_date: date_type) -> list:
     the smoking series (see TrajectoryStrip's smoking-row gating)."""
     by_date = {}
     for log in logs:
-        severities = [s.get("severity") for s in (log.symptoms or []) if s.get("severity") is not None]
         by_date[log.date] = {
-            "severity": round(sum(severities) / len(severities), 1) if severities else None,
+            "severity": compute_day_severity(log),
             "episode": bool((log.episode or {}).get("occurred")),
             "smoked": bool((log.lifestyle or {}).get("smoked")),
             "logged": True,

@@ -13,6 +13,7 @@ import { InsightUnits } from "../../components/clinician/InsightUnits";
 import { GlanceLayer } from "../../components/clinician/GlanceLayer";
 import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
 import { RankedFlag } from "../../components/clinician/RankedFlag";
+import { WhatWentWell } from "../../components/clinician/WhatWentWell";
 import { CustomizeControl } from "../../components/clinician/CustomizeControl";
 import { DEFAULT_CLINICIAN_PREFS, loadClinicianPrefs, saveClinicianPrefs, type ClinicianPrefs } from "../../lib/clinicianPrefs";
 import type { ClinicianPortalResponse } from "../../lib/types";
@@ -107,13 +108,12 @@ function DashboardContent() {
     );
   }
 
-  const { patient, clinical_summary, stats, symptom_frequency, med_adherence, recent_notes, window, trajectory, top_flag } = portal;
+  const { patient, clinical_summary, stats, symptom_frequency, med_adherence, recent_notes, window, top_flag } = portal;
 
   // A patient with literally zero sleep logs ever gets no card at all, rather
   // than a "No data" shell sitting alone — sections with nothing to say
   // render nothing, per the same principle EmptyState applies elsewhere.
   const hasSleepData = stats.avg_sleep.days_logged > 0;
-  const hasTrajectory = trajectory.days.length > 0;
 
   return (
     <div className="min-h-screen pb-10">
@@ -156,10 +156,18 @@ function DashboardContent() {
           <div className="space-y-6 min-w-0">
             <InsightUnits insights={clinical_summary?.insights ?? []} onReveal={revealNotes} />
 
-            {/* Ranked flag — the one and only flag section, red reserved for this only. Never optional. */}
-            <div>
-              <SectionTitle>Flagged This Period</SectionTitle>
-              <RankedFlag topFlag={top_flag} patientId={patientId} />
+            {/* Caregiver Alert (red, ranked flag — never optional) beside What
+                Went Well (green, attributed positives) — good and bad side by
+                side on desktop, Caregiver Alert first when stacked on mobile. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-stretch">
+              <div>
+                <SectionTitle>Caregiver Alert</SectionTitle>
+                <RankedFlag topFlag={top_flag} patientId={patientId} />
+              </div>
+              <div>
+                <SectionTitle>What Went Well</SectionTitle>
+                <WhatWentWell items={clinical_summary?.what_went_well ?? []} />
+              </div>
             </div>
           </div>
 
@@ -179,12 +187,7 @@ function DashboardContent() {
               />
             )}
 
-            {prefs.showTrajectory && hasTrajectory && (
-              <div>
-                <SectionTitle>How the Month Moved</SectionTitle>
-                <TrajectoryStrip days={trajectory.days} />
-              </div>
-            )}
+            {prefs.showTrajectory && <TrajectoryStrip patientId={patientId} />}
 
             {prefs.showSymptomFrequency && (
               <div>

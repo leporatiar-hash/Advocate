@@ -12,11 +12,15 @@ from services.aggregation import (
     build_patient_aggregate,
     build_flags,
     build_trajectory,
+    build_temporal_bins,
     build_top_flag,
+    combine_bin_severity,
     group_observation_periods,
     raw_trend,
     symptom_trend,
+    NOT_ENOUGH_HISTORY_DAYS,
     SLEEP_DATA_FLOOR,
+    TEMPORAL_WINDOW_DAYS,
     TREND_LOW_N_DAYS,
 )
 
@@ -250,6 +254,64 @@ def get_clinician_portal(
         "symptom_frequency": symptom_frequency,
         "med_adherence": med_adherence,
         "recent_notes": recent_notes,
+    }
+
+
+@router.get("/patient/{patient_id}/temporal", response_model=schemas.TemporalResponse)
+def get_clinician_temporal(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_clinician),
+):
+    """Temporal Data section — the adaptive multi-month trajectory. Deliberately
+    a separate endpoint from /portal: it always looks back TEMPORAL_WINDOW_DAYS
+    (12 months), ignoring whatever window the rest of the page is showing, so
+    the two never fight over one `window_days` param."""
+    _get_linked_patient(patient_id, current_user, db)
+
+    today = datetime.now().date()
+    window_start = today - timedelta(days=TEMPORAL_WINDOW_DAYS)
+
+    logs = (
+        db.query(models.DailyLog)
+        .filter(
+            models.DailyLog.patient_id == patient_id,
+            models.DailyLog.date >= window_start,
+            models.DailyLog.date <= today,
+        )
+        .order_by(models.DailyLog.date.asc())
+        .all()
+    )
+
+    bins = build_temporal_bins(logs)
+
+    # Read-only cache lookup — same cached row the Clinical Summary reads, same
+    # rule: generated only by scripts/generate_synthesis.py, never on this GET path.
+    synthesis_row = (
+        db.query(models.ClinicianNoteSynthesis)
+        .filter(models.ClinicianNoteSynthesis.patient_id == patient_id)
+        .first()
+    )
+    cached_readouts = ((synthesis_row.content if synthesis_row else {}) or {}).get("temporal_readouts") or {}
+
+    result_bins = []
+    for b in bins:
+        cached = cached_readouts.get(b["start"].isoformat(), {})
+        bin_sev, color = combine_bin_severity(b, cached.get("note_severity"))
+        result_bins.append({
+            **b,
+            "color": color,
+            "bin_sev": bin_sev,
+            "readout": cached.get("readout"),
+        })
+
+    total_logged_days = len({log.date for log in logs})
+
+    return {
+        "bins": result_bins,
+        "bin_size": bins[0]["bin_size"] if bins else "day",
+        "total_logged_days": total_logged_days,
+        "not_enough_history": total_logged_days < NOT_ENOUGH_HISTORY_DAYS,
     }
 
 

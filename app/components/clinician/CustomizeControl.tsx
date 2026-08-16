@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { ClinicianPrefs } from "../../lib/clinicianPrefs";
 
 const TOGGLES: { key: keyof ClinicianPrefs; label: string }[] = [
-  { key: "showTrajectory", label: "How the month moved" },
+  { key: "showTrajectory", label: "Temporal data" },
   { key: "showSymptomFrequency", label: "Symptom frequency" },
   { key: "showMedAdherence", label: "Medication adherence" },
   { key: "showRawNotes", label: "Raw notes" },

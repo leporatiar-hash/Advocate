@@ -36,9 +36,9 @@ export function deriveGlanceStatus(portal: ClinicianPortalResponse): { status: S
     return {
       status: "review",
       // Names the flag without repeating its (potentially long) note text —
-      // the real content lives in the Flagged This Period card below, once.
+      // the real content lives in the Caregiver Alert card below, once.
       headline: top_flag
-        ? `Highest-severity note logged ${fmtShortDate(top_flag.date)}. See Flagged This Period below.`
+        ? `Highest-severity note logged ${fmtShortDate(top_flag.date)}. See Caregiver Alert below.`
         : `Flagged episodes rose to ${glance_stats.flagged_episodes.value} this period, up from ${glance_stats.flagged_episodes.prev ?? 0}.`,
     };
   }
