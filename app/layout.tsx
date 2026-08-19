@@ -5,6 +5,7 @@ import "./globals.css";
 import { AuthProvider } from "./components/AuthProvider";
 import { Toaster } from "react-hot-toast";
 import TopProgressBar from "./components/TopProgressBar";
+import { Analytics } from "@vercel/analytics/next";
 
 const geist = Geist({
   variable: "--font-geist-sans",
@@ -60,6 +61,7 @@ export default function RootLayout({
             }}
           />
         </AuthProvider>
+        <Analytics />
       </body>
     </html>
   );
