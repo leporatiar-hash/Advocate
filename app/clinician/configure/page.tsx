@@ -35,7 +35,14 @@ export default function ClinicianConfigurePage() {
     if (!isLoading && !user) router.push("/login");
   }, [user, isLoading, router]);
 
+  // Starts at defaults so the prerendered shell is stable, then picks up the
+  // real stored value on mount — localStorage doesn't exist during `output:
+  // "export"`, so this genuinely cannot be read during render. This page holds
+  // an editable draft of the prefs, so useSyncExternalStore is the wrong shape:
+  // the store seeds local state, it doesn't own it. Same pattern as the
+  // dashboard; the one extra render on mount is the intended cost.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPrefs(loadClinicianPrefs());
   }, []);
 
