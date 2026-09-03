@@ -29,6 +29,17 @@ def _serialize_log_field(value):
     return value
 
 
+def _client_today(date_str: Optional[str]) -> date_type:
+    """The caller's local calendar date, falling back to server time when the
+    client didn't send one (or sent something unparseable)."""
+    if date_str:
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    return datetime.now().date()
+
+
 def _verify_patient(patient_id: int, current_user: models.User, db: Session) -> models.Patient:
     patient = (
         db.query(models.Patient)
@@ -114,13 +125,7 @@ def get_today_log(
 ):
     _verify_patient(patient_id, current_user, db)
 
-    if date:
-        try:
-            today = datetime.strptime(date, "%Y-%m-%d").date()
-        except ValueError:
-            today = datetime.now().date()
-    else:
-        today = datetime.now().date()
+    today = _client_today(date)
     return (
         db.query(models.DailyLog)
         .filter(
@@ -135,12 +140,17 @@ def get_today_log(
 def get_missed_days(
     patient_id: int,
     days: int = Query(default=30),
+    date: Optional[str] = Query(default=None, description="Client local date YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     _verify_patient(patient_id, current_user, db)
 
-    today = datetime.now().date()
+    # Must be the caregiver's local date, not the server's. On a UTC server, a
+    # caregiver east or west of UTC has already rolled into the next server day
+    # while their own day is still open — computing "yesterday" from server time
+    # would report their current, still-loggable day as missed.
+    today = _client_today(date)
     yesterday = today - timedelta(days=1)
 
     first_log = (

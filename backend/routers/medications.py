@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+import json
+import urllib.parse
+import urllib.request
+
+from medications_reference import COMMON_MEDICATIONS
 
 from database import get_db
 import models
@@ -497,3 +502,112 @@ def get_known_side_effects(
     """Return known side effects for a medication based on its name."""
     med = _get_owned_medication(medication_id, current_user, db)
     return lookup_known_side_effects(med.name)
+
+
+# ── Medication name search ────────────────────────────────────────────────────
+#
+# Two tiers, in this order:
+#   1. The bundled curated list (medications_reference.py) — instant, offline,
+#      always available. Covers what caregivers on this app actually log.
+#   2. RxNav spelling suggestions from the NLM — only consulted when the local
+#      list came up short AND the query is long enough to be meaningful. This is
+#      what turns "sertralin" into "Sertraline".
+#
+# RxNav is treated as strictly optional. It is called with a short timeout, its
+# failures are swallowed, and a caregiver on a bad connection sees the local
+# results with no error and no delay they'd notice. Free text is always still
+# accepted — this endpoint never gates what someone can enter.
+
+_RXNAV_SPELLING = "https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name="
+_RXNAV_TIMEOUT_SECONDS = 2.5
+_MIN_QUERY_FOR_REMOTE = 3
+
+# Process-local memo. Bounded so a long-running dyno can't grow unboundedly on
+# adversarial input; RxNorm names don't change on a timescale that matters here.
+_rxnav_cache: dict[str, list[str]] = {}
+_RXNAV_CACHE_MAX = 500
+
+
+def _score_local(entry: str, q: str) -> Optional[int]:
+    """Lower is better; None means no match. Ranks a match on the start of the
+    generic name above a match on the brand in parentheses, which is above a
+    match buried mid-word — so typing "zol" surfaces Zolpidem before
+    Sertraline (Zoloft)."""
+    lowered = entry.lower()
+    if lowered.startswith(q):
+        return 0
+    # Start of the bracketed brand, e.g. "Sertraline (Zoloft)" for q="zolo"
+    bracket = lowered.find("(")
+    if bracket != -1 and lowered[bracket + 1:].startswith(q):
+        return 1
+    # Start of any other word
+    if any(word.startswith(q) for word in lowered.replace("/", " ").replace("(", " ").split()):
+        return 2
+    if q in lowered:
+        return 3
+    return None
+
+
+def _search_local(q: str, limit: int) -> list[dict]:
+    scored = []
+    for entry in COMMON_MEDICATIONS:
+        score = _score_local(entry, q)
+        if score is not None:
+            scored.append((score, entry))
+    scored.sort(key=lambda pair: (pair[0], pair[1]))
+    return [{"name": entry, "source": "local", "approximate": False} for _, entry in scored[:limit]]
+
+
+def _search_rxnav(q: str) -> list[str]:
+    """Spelling-tolerant name suggestions from RxNav. Returns [] on any failure —
+    a network problem must never surface as an error in a medication field."""
+    if q in _rxnav_cache:
+        return _rxnav_cache[q]
+    try:
+        url = _RXNAV_SPELLING + urllib.parse.quote(q)
+        with urllib.request.urlopen(url, timeout=_RXNAV_TIMEOUT_SECONDS) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        suggestions = (
+            payload.get("suggestionGroup", {})
+            .get("suggestionList", {})
+            .get("suggestion")
+        ) or []
+        names = [s for s in suggestions if isinstance(s, str)]
+    except Exception:
+        # Deliberately broad: timeouts, DNS, TLS, malformed JSON, schema drift.
+        # Every one of them means "no suggestions", not "the form is broken".
+        names = []
+
+    if len(_rxnav_cache) >= _RXNAV_CACHE_MAX:
+        _rxnav_cache.clear()
+    _rxnav_cache[q] = names
+    return names
+
+
+@router.get("/search", response_model=List[schemas.MedicationSuggestion])
+def search_medications(
+    q: str = Query(default="", description="Partial medication name"),
+    limit: int = Query(default=8, ge=1, le=20),
+    current_user: models.User = Depends(get_current_user),
+):
+    query = (q or "").strip().lower()
+    if len(query) < 2:
+        return []
+
+    results = _search_local(query, limit)
+    if len(results) >= limit or len(query) < _MIN_QUERY_FOR_REMOTE:
+        return results
+
+    seen = {r["name"].lower() for r in results}
+    for name in _search_rxnav(query):
+        if len(results) >= limit:
+            break
+        # RxNorm names are shouty and inconsistent; title-case them so the
+        # dropdown doesn't mix "SERTRALINE" with "Sertraline (Zoloft)".
+        pretty = name.strip().title()
+        if pretty.lower() in seen:
+            continue
+        seen.add(pretty.lower())
+        results.append({"name": pretty, "source": "rxnorm", "approximate": True})
+
+    return results

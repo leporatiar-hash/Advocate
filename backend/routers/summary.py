@@ -177,6 +177,23 @@ def generate_summary(
         for d in adherence.values()
     ) or "  No medications tracked."
 
+    # Only state a statistic that actually has a value. A metric with no logged
+    # data must be omitted, never rendered as "None" — handing the model a
+    # null-valued stat invites it to reason about a number that doesn't exist.
+    # (`mood_score` in particular is currently never written by any client, so
+    # avg_mood is always None until a mood input ships.)
+    stat_lines = [f"- Total log entries: {total_logs}"]
+    if avg_sleep is not None:
+        stat_lines.append(f"- Average sleep: {avg_sleep} hours/night")
+    if avg_mood is not None:
+        stat_lines.append(f"- Average mood score: {avg_mood}/10")
+    if any(hydration_counts.get(k) for k in ("Good", "Fair", "Poor")):
+        stat_lines.append(
+            f"- Hydration days logged: Good={hydration_counts.get('Good', 0)}, "
+            f"Fair={hydration_counts.get('Fair', 0)}, Poor={hydration_counts.get('Poor', 0)}"
+        )
+    aggregated_stats_text = "\n".join(stat_lines)
+
     # Build known vs observed side effects context per medication
     known_se_context_lines = []
     med_known_effects: dict = {}
@@ -264,10 +281,7 @@ MEDICATION ADHERENCE:
 {med_list_text}
 
 AGGREGATED STATISTICS:
-- Total log entries: {total_logs}
-- Average sleep: {avg_sleep} hours/night
-- Average mood score: {avg_mood}/10
-- Hydration days logged: Good={hydration_counts.get("Good", 0)}, Fair={hydration_counts.get("Fair", 0)}, Poor={hydration_counts.get("Poor", 0)}
+{aggregated_stats_text}
 
 SYMPTOM TRACKING (Severity on a 1–10 scale — out of {total_logs} logged days):
 {symptom_tracking_text}
