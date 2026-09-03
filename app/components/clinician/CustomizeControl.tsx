@@ -1,14 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import type { ClinicianPrefs } from "../../lib/clinicianPrefs";
-
-const TOGGLES: { key: keyof ClinicianPrefs; label: string }[] = [
-  { key: "showTrajectory", label: "Temporal data" },
-  { key: "showSymptomFrequency", label: "Symptom frequency" },
-  { key: "showMedAdherence", label: "Medication adherence" },
-  { key: "showRawNotes", label: "Raw notes" },
-];
+import Link from "next/link";
 
 function GearIcon() {
   return (
@@ -19,76 +11,22 @@ function GearIcon() {
   );
 }
 
-// Demo-local only — see app/lib/clinicianPrefs.ts. Toggles the four optional
-// sections; the glance layer, insights, and the ranked flag are never
-// hideable from here by design.
-export function CustomizeControl({
-  prefs,
-  onChange,
-  onReset,
-}: {
-  prefs: ClinicianPrefs;
-  onChange: (next: ClinicianPrefs) => void;
-  onReset: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-
+/**
+ * Entry point to the layout editor.
+ *
+ * This used to be an inline popover of four checkboxes. Reordering needs more
+ * room than a dropdown affords — and the layout is one setting that applies to
+ * every patient, not a per-patient view state — so it now links to the
+ * dedicated Configure page instead of editing prefs in place.
+ */
+export function CustomizeControl() {
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-white/80 hover:text-white text-sm flex-shrink-0 transition-colors"
-        aria-expanded={open}
-        aria-haspopup="true"
-      >
-        <GearIcon />
-        Customize
-      </button>
-
-      {open && (
-        <>
-          {/* Click-outside catcher */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            className="absolute right-0 top-full mt-2 w-64 rounded-xl border p-4 z-50"
-            style={{ background: "#fff", borderColor: "var(--cp-border)", boxShadow: "0 8px 24px rgba(15,23,42,0.15)" }}
-          >
-            <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: "var(--cp-text-muted)" }}>
-              Customize this view
-            </p>
-            <div className="space-y-2.5">
-              {TOGGLES.map((t) => (
-                <label
-                  key={t.key}
-                  className="flex items-center justify-between gap-3 text-sm cursor-pointer"
-                  style={{ color: "var(--cp-text)" }}
-                >
-                  <span>{t.label}</span>
-                  <input
-                    type="checkbox"
-                    checked={prefs[t.key]}
-                    onChange={(e) => onChange({ ...prefs, [t.key]: e.target.checked })}
-                    className="h-4 w-4 flex-shrink-0"
-                    style={{ accentColor: "var(--cp-teal)" }}
-                  />
-                </label>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={onReset}
-              className="text-xs font-semibold mt-4 hover:underline"
-              style={{ color: "var(--cp-teal)" }}
-            >
-              Reset to defaults
-            </button>
-            <p className="text-[11px] mt-3 pt-3" style={{ color: "var(--cp-text-muted)", borderTop: "1px solid var(--cp-border)" }}>
-              Saved to this browser only.
-            </p>
-          </div>
-        </>
-      )}
-    </div>
+    <Link
+      href="/clinician/configure/"
+      className="flex items-center gap-1.5 text-white/80 hover:text-white text-sm flex-shrink-0 transition-colors"
+    >
+      <GearIcon />
+      Configure
+    </Link>
   );
 }

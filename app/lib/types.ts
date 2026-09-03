@@ -271,9 +271,49 @@ export interface AssessmentDataEntry {
 
 // ── Clinician Portal ────────────────────────────────────────────────────────
 
+export interface ShareCode {
+  code: string;
+  expires_at: string;
+  redemption_count: number;
+  revoked: boolean;
+}
+
+export interface LinkedClinician {
+  clinician_id: number;
+  name: string | null;
+  email: string;
+  linked_at: string;
+}
+
+export interface RedeemCodeResult {
+  patient_id: number;
+  patient_name: string;
+}
+
+export interface MedicationSuggestion {
+  name: string;
+  /** "local" = curated bundled list, "rxnorm" = NLM RxNav lookup. */
+  source: string;
+  /** True for spelling-tolerant matches, shown as "did you mean". */
+  approximate: boolean;
+}
+
 export interface ClinicianPatientSummary {
   id: number;
   name: string;
+  age: number | null;
+  diagnosis: string | null;
+  days_logged: number;
+  days_in_window: number;
+  last_log_date: string | null;
+  high_flags: number;
+  moderate_flags: number;
+  low_flags: number;
+  top_concern: string | null;
+  adherence_pct: number | null;
+  avg_symptom_severity: number | null;
+  /** Per-day mean symptom severity, oldest first; null on unlogged days. */
+  severity_series: (number | null)[];
 }
 
 export interface PortalWindow {
@@ -385,6 +425,24 @@ export interface TemporalResponse {
   not_enough_history: boolean;
 }
 
+export interface SymptomSeries {
+  symptom: string;
+  /** One entry per date in the parent block; null where not scored that day. */
+  values: (number | null)[];
+}
+
+export interface SymptomSeriesBlock {
+  dates: string[];
+  series: SymptomSeries[];
+  /** Symptoms present but not charted, so the UI can disclose the cap. */
+  omitted: number;
+}
+
+export interface AdherenceSeriesBlock {
+  dates: string[];
+  values: (number | null)[];
+}
+
 export interface TopFlag {
   date: string;
   text: string;
@@ -402,6 +460,8 @@ export interface ClinicianPortalResponse {
   trajectory: PortalTrajectory;
   top_flag: TopFlag | null;
   symptom_frequency: SymptomFrequencyEntry[];
+  symptom_series: SymptomSeriesBlock;
+  adherence_series: AdherenceSeriesBlock;
   med_adherence: MedAdherenceEntry[];
   recent_notes: RecentNote[];
 }

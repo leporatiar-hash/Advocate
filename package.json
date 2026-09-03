@@ -4,6 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:web": "next dev",
+    "dev:web:phone": "NEXT_PUBLIC_API_URL=/backend next dev",
+    "dev:backend": "cd backend && python3 -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:proxy": "node scripts/mobile-proxy.mjs",
+    "omnara": "omnara --codex",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -14,6 +19,7 @@
     "@capacitor/core": "^8.3.0",
     "@capacitor/ios": "^8.3.0",
     "@vercel/analytics": "^2.0.1",
+    "chart.js": "^4.4.7",
     "next": "16.1.6",
     "nprogress": "^0.2.0",
     "react": "19.2.3",

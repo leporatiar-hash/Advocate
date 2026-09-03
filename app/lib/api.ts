@@ -138,7 +138,7 @@ export const api = {
   },
   getTodayLog: (patientId: number) => request(`/logs/${patientId}/today?date=${localDateStr()}`),
   getLogByDate: (patientId: number, date: string) => request(`/logs/${patientId}/date/${date}`),
-  getMissedDays: (patientId: number) => request(`/logs/${patientId}/missed-days`),
+  getMissedDays: (patientId: number) => request(`/logs/${patientId}/missed-days?date=${localDateStr()}`),
   quickLog: (patientId: number, date: string, type: string, note?: string) =>
     request(`/logs/${patientId}/quick`, { method: "POST", body: JSON.stringify({ date, type, note }) }),
   correctMedicationTaken: (patientId: number, date: string, medicationId: number) =>
@@ -187,8 +187,26 @@ export const api = {
   resetPassword: (token: string, new_password: string) =>
     request("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, new_password }) }),
 
+  // Sharing a patient with a clinician
+  getShareCode: (patientId: number) => request(`/patients/${patientId}/share-code`),
+  createShareCode: (patientId: number) =>
+    request(`/patients/${patientId}/share-code`, { method: "POST" }),
+  revokeShareCode: (patientId: number) =>
+    request(`/patients/${patientId}/share-code`, { method: "DELETE" }),
+  getLinkedClinicians: (patientId: number) => request(`/patients/${patientId}/clinicians`),
+  revokeClinicianAccess: (patientId: number, clinicianId: number) =>
+    request(`/patients/${patientId}/clinicians/${clinicianId}`, { method: "DELETE" }),
+  redeemShareCode: (code: string) =>
+    request("/clinicians/redeem", { method: "POST", body: JSON.stringify({ code }) }),
+
+  // Medication name search — curated list first, RxNav for misspellings
+  searchMedications: (q: string, limit = 8) =>
+    request(`/medications/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+
   // Clinician portal
-  getClinicianPatients: () => request("/clinicians/patients"),
+  getClinicianPatients: (windowDays = 30) =>
+    request(`/clinicians/patients?window_days=${windowDays}`),
+  getClinicianDiagnoses: () => request("/clinicians/diagnoses"),
   getClinicianPortal: (patientId: number, windowDays = 30) =>
     request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
   getClinicianTemporal: (patientId: number) =>
