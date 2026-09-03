@@ -50,3 +50,9 @@ ios/App/build/
 ios/App/DerivedData/
 ios/App/App.xcodeproj/xcuserdata/
 ios/App/App/public/
+
+# Local demo (created by ./demo.sh — throwaway, never committed)
+backend/.venv/
+backend/demo.db
+demo.db
+*.db-journal
