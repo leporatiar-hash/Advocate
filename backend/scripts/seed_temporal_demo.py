@@ -43,7 +43,12 @@ def _guard_local_only() -> None:
     host = parsed.hostname or ""
     dbname = (parsed.path or "").lstrip("/")
     print(f"Target database: host={host!r} db={dbname!r}")
-    if host not in ("localhost", "127.0.0.1"):
+    # SQLite is a local file by definition and has no hostname to check, so
+    # accept it outright — otherwise the localhost test below rejects every
+    # sqlite:/// URL and there is no zero-setup way to seed a demo database.
+    if DATABASE_URL.startswith("sqlite"):
+        pass
+    elif host not in ("localhost", "127.0.0.1"):
         print(f"REFUSING TO SEED: host {host!r} is not localhost/127.0.0.1. Aborting.")
         sys.exit(1)
     if os.getenv("SEED_CONFIRM") != "1":

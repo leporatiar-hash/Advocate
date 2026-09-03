@@ -47,7 +47,12 @@ def _guard_local_only() -> None:
     dbname = (parsed.path or "").lstrip("/")
     print(f"Target database: host={host!r} db={dbname!r}")
 
-    if host not in ("localhost", "127.0.0.1"):
+    # SQLite is a local file by definition and has no hostname to check, so
+    # accept it outright — otherwise the localhost test below rejects every
+    # sqlite:/// URL and there is no zero-setup way to seed a demo database.
+    if DATABASE_URL.startswith("sqlite"):
+        pass
+    elif host not in ("localhost", "127.0.0.1"):
         print(
             f"REFUSING TO SEED: host {host!r} is not localhost/127.0.0.1. "
             "This script only ever writes to a local database. Aborting."
@@ -225,7 +230,9 @@ def _print_summary(db, patient_id) -> None:
             f"avg={cur['avg_severity'] if cur else None} "
             f"prev_avg={prev['avg_severity'] if prev else None}"
         )
-    top_flag = build_top_flag(agg["observation_periods"])
+    # Same call shape as routers/clinicians.py — build_top_flag now needs the
+    # symptom stats too, so it can suppress low-n spikes from the loudest slot.
+    top_flag = build_top_flag(agg["observation_periods"], agg["symptom_stats"])
     print(f"top_flag: {top_flag}")
 
 
