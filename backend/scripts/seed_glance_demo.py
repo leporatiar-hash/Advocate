@@ -76,7 +76,8 @@ from auth import get_password_hash  # noqa: E402
 
 CAREGIVER_EMAIL = "caregiver.glancetest@example.com"
 CLINICIAN_EMAIL = "clinician.glancetest@example.com"
-CLINICIAN_PASSWORD = "glancedemo123"
+DEMO_PASSWORD = "glancedemo123"
+CLINICIAN_PASSWORD = DEMO_PASSWORD  # kept for the summary printout below
 PATIENT_NAME = "Demo Patient (glance-test)"
 
 TODAY = date.today()
@@ -240,7 +241,12 @@ def main() -> None:
     db = SessionLocal()
     try:
         caregiver = _get_or_create_user(
-            db, CAREGIVER_EMAIL, "Glance Demo Caregiver", models.UserRole.caregiver
+            db, CAREGIVER_EMAIL, "Glance Demo Caregiver", models.UserRole.caregiver,
+            # Was created with a random unknowable password, which made the
+            # caregiver side of the demo (the whole sharing flow) impossible to
+            # log into. Same password as the clinician — this is fixture data on
+            # a throwaway local database.
+            password=DEMO_PASSWORD,
         )
 
         patient = db.query(models.Patient).filter(models.Patient.name == PATIENT_NAME).first()
@@ -300,10 +306,11 @@ def main() -> None:
         _seed_daily_logs(db, patient.id, caregiver.id, med.id)
 
         db.commit()
-        print("\nDone. Log in as clinician:")
-        print(f"  email:    {CLINICIAN_EMAIL}")
-        print(f"  password: {CLINICIAN_PASSWORD}")
-        print(f"  patient:  {PATIENT_NAME} (id={patient.id})")
+        print("\nDone. Both demo logins (password is the same for each):")
+        print(f"  clinician: {CLINICIAN_EMAIL}")
+        print(f"  caregiver: {CAREGIVER_EMAIL}")
+        print(f"  password:  {DEMO_PASSWORD}")
+        print(f"  patient:   {PATIENT_NAME} (id={patient.id})")
 
         _print_summary(db, patient.id)
     finally:
