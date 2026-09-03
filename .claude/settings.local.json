@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/alexleporati/truefit-meds add public/AdvocateHome.png app/page.tsx)",
+      "Bash(git -C /Users/alexleporati/truefit-meds commit -m ' *)",
+      "Bash(git -C /Users/alexleporati/truefit-meds push)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

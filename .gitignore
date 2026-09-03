@@ -43,3 +43,10 @@ yarn-error.log*
 next-env.d.ts
 __pycache__/
 *.pyc
+
+# iOS / Capacitor build output (the Xcode project itself IS tracked)
+ios/App/Pods/
+ios/App/build/
+ios/App/DerivedData/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App/public/
