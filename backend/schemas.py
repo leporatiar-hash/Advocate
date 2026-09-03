@@ -327,11 +327,69 @@ class AssessmentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Patient sharing ───────────────────────────────────────────────────────────
+
+class ShareCodeResponse(BaseModel):
+    code: str
+    expires_at: datetime
+    redemption_count: int
+    revoked: bool
+
+    model_config = {"from_attributes": True}
+
+
+class RedeemCodeRequest(BaseModel):
+    code: str
+
+
+class RedeemCodeResponse(BaseModel):
+    patient_id: int
+    patient_name: str
+
+
+class LinkedClinician(BaseModel):
+    """A clinician who currently has read-only access to a patient, shown to the
+    caregiver so consent is visible and revocable rather than invisible."""
+    clinician_id: int
+    name: Optional[str] = None
+    email: str
+    linked_at: datetime
+
+
+class MedicationSuggestion(BaseModel):
+    name: str
+    # "local" = curated bundled list, "rxnorm" = NLM RxNav lookup. Surfaced so the
+    # UI can mark unverified fuzzy matches differently from curated entries.
+    source: str
+    # True when this came back from a spelling-tolerant match rather than a
+    # prefix match, so the UI can present it as "did you mean".
+    approximate: bool = False
+
+
 # ── Clinician Portal ──────────────────────────────────────────────────────────
 
 class ClinicianPatientSummary(BaseModel):
+    """One row of the clinician's patient roster. Carries enough to triage,
+    search and filter the whole panel without opening anyone — the list is the
+    clinician's first screen, so it has to answer "who needs me today?" on its
+    own."""
     id: int
     name: str
+    age: Optional[int] = None
+    diagnosis: Optional[str] = None
+    days_logged: int = 0
+    days_in_window: int = 0
+    last_log_date: Optional[date] = None
+    high_flags: int = 0
+    moderate_flags: int = 0
+    low_flags: int = 0
+    top_concern: Optional[str] = None
+    adherence_pct: Optional[float] = None
+    avg_symptom_severity: Optional[float] = None
+    # Per-day mean symptom severity across the window, oldest first, null on
+    # unlogged days — drives the roster sparkline. Same numbers as the portal's
+    # trajectory, deliberately not recomputed differently here.
+    severity_series: List[Optional[float]] = []
 
 
 class PortalWindow(BaseModel):
@@ -483,6 +541,26 @@ class TopFlag(BaseModel):
     note_id: Optional[str] = None
 
 
+class SymptomSeries(BaseModel):
+    symptom: str
+    # One entry per date in the parent's `dates`, null where that symptom was
+    # not scored that day. Never zero-filled — a gap is not a good day.
+    values: List[Optional[float]]
+
+
+class SymptomSeriesBlock(BaseModel):
+    dates: List[str]
+    series: List[SymptomSeries]
+    # Symptoms present in the window but not charted (palette slot cap), so the
+    # UI can disclose the truncation instead of hiding it.
+    omitted: int = 0
+
+
+class AdherenceSeriesBlock(BaseModel):
+    dates: List[str]
+    values: List[Optional[float]]
+
+
 class ClinicianPortalResponse(BaseModel):
     window: PortalWindow
     patient: PortalPatient
@@ -493,6 +571,8 @@ class ClinicianPortalResponse(BaseModel):
     trajectory: PortalTrajectory
     top_flag: Optional[TopFlag] = None
     symptom_frequency: List[SymptomFrequencyEntry]
+    symptom_series: SymptomSeriesBlock
+    adherence_series: AdherenceSeriesBlock
     med_adherence: List[MedAdherenceEntry]
     recent_notes: List[RecentNote]
 

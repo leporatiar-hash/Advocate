@@ -194,6 +194,39 @@ class ClinicianPatientLink(Base):
     patient = relationship("Patient", foreign_keys=[patient_id])
 
 
+class PatientShareCode(Base):
+    """A caregiver-issued grant of read-only access to ONE patient.
+
+    Consent sits with the caregiver: they generate a code, hand it to their
+    clinician out of band (read it out at an appointment, text it), and can
+    revoke it at any time. There is deliberately no clinician-initiated path to
+    a patient — a clinician can never request access, only receive it.
+
+    Redeeming a code creates a ClinicianPatientLink. Revoking the CODE only
+    stops future redemptions; it does not retract access already granted. To cut
+    off a clinician who already redeemed, delete the link (see the
+    /patients/{id}/clinicians endpoints) — those are two different actions and
+    the UI says so.
+
+    Codes stay usable until they expire or are revoked, so one code can be given
+    to a psychiatrist and a therapist without regenerating.
+    """
+    __tablename__ = "patient_share_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(16), unique=True, index=True, nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    revoked = Column(Boolean, default=False)
+    redemption_count = Column(Integer, default=0)
+    last_redeemed_at = Column(DateTime, nullable=True)
+
+    patient = relationship("Patient", foreign_keys=[patient_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+
 class ClinicianNoteSynthesis(Base):
     """Cached AI synthesis of a patient's caregiver notes for the clinician portal's
     Clinical Summary. Generated only by the explicit scripts/generate_synthesis.py

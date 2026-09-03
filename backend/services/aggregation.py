@@ -113,7 +113,12 @@ def build_patient_aggregate(
     if end_date is None:
         end_date = today
     if start_date is None:
-        start_date = end_date - timedelta(days=window_days)
+        # Inclusive of both endpoints, so a `window_days`-day request spans
+        # exactly `window_days` calendar days. Previously this subtracted
+        # `window_days` outright, producing a window_days+1 span — which let
+        # `days_logged` exceed the window size and render as ">100% logged"
+        # on the clinician portal.
+        start_date = end_date - timedelta(days=window_days - 1)
 
     logs = (
         db.query(models.DailyLog)
@@ -553,6 +558,78 @@ def build_trajectory(logs, start_date: date_type, end_date: date_type) -> list:
         days.append({"date": d, **entry})
         d += timedelta(days=1)
     return days
+
+
+# Most symptom series to plot on one shared-axis chart. The categorical palette
+# is assigned in fixed slot order and capped rather than cycled — a 6th series
+# would have to reuse a hue, and two symptoms sharing a color on a clinical
+# chart is worse than not plotting the 6th. Remainder is disclosed in the UI.
+MAX_CHARTED_SYMPTOMS = 5
+
+
+def build_symptom_series(logs, start_date: date_type, end_date: date_type, limit: int = MAX_CHARTED_SYMPTOMS) -> dict:
+    """Per-symptom daily severity across the window, for the portal's trend
+    charts. One row per calendar day so every series shares one x-axis; a day
+    with no log, or a day where that particular symptom wasn't scored, is None
+    rather than 0 — absent data must render as a gap, never as a good day.
+
+    Symptoms are ranked by how many days they were present (then by average
+    severity) and capped at `limit`; the caller is told how many were omitted so
+    it can say so rather than silently truncating.
+    """
+    by_symptom: dict = defaultdict(dict)
+    for log in logs:
+        for s in (log.symptoms or []):
+            sev = s.get("severity")
+            if sev is None:
+                continue
+            by_symptom[s["name"]][log.date] = sev
+
+    ranked = sorted(
+        by_symptom.items(),
+        key=lambda kv: (len(kv[1]), sum(kv[1].values()) / len(kv[1]) if kv[1] else 0),
+        reverse=True,
+    )
+    charted = ranked[:limit]
+
+    dates = []
+    d = start_date
+    while d <= end_date:
+        dates.append(d)
+        d += timedelta(days=1)
+
+    return {
+        "dates": [d.isoformat() for d in dates],
+        "series": [
+            {"symptom": name, "values": [values.get(d) for d in dates]}
+            for name, values in charted
+        ],
+        "omitted": max(0, len(ranked) - len(charted)),
+    }
+
+
+def build_adherence_series(logs, start_date: date_type, end_date: date_type) -> dict:
+    """Daily medication adherence as a percentage of that day's logged doses.
+    None on days with no medication entries at all — an unlogged day is not a
+    0% day, and plotting it as one would invent a missed dose."""
+    dates = []
+    d = start_date
+    while d <= end_date:
+        dates.append(d)
+        d += timedelta(days=1)
+
+    by_date = {}
+    for log in logs:
+        entries = log.medications_taken or []
+        if not entries:
+            continue
+        taken = sum(1 for e in entries if e.get("taken"))
+        by_date[log.date] = round(taken / len(entries) * 100, 1)
+
+    return {
+        "dates": [d.isoformat() for d in dates],
+        "values": [by_date.get(d) for d in dates],
+    }
 
 
 def build_top_flag(observation_periods: list, symptom_stats: dict) -> Optional[dict]:

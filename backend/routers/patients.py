@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from datetime import datetime, timedelta
 import json
 import os
+import secrets
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -277,3 +279,150 @@ Return exactly this JSON structure:
     db.commit()
     db.refresh(patient)
     return patient
+
+
+# ── Sharing a patient with a clinician ────────────────────────────────────────
+#
+# The consent model: a caregiver generates a short code and gives it to their
+# clinician however they like — read it out at an appointment, text it. The
+# clinician redeems it once to gain read-only access to that one patient.
+#
+# Deliberately NOT built: any way for a clinician to search for, request, or
+# discover a patient. Access only ever flows outward from the caregiver.
+
+# Excludes I, L, O, 0 and 1 — codes get read aloud and written down, and those
+# are the characters people get wrong.
+_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+_CODE_TTL_DAYS = 14
+
+
+def _generate_code(db: Session) -> str:
+    for _ in range(10):
+        raw = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
+        code = f"{raw[:4]}-{raw[4:]}"
+        if not db.query(models.PatientShareCode).filter(models.PatientShareCode.code == code).first():
+            return code
+    raise HTTPException(status_code=500, detail="Could not allocate a share code. Try again.")
+
+
+def _active_code(patient_id: int, db: Session):
+    return (
+        db.query(models.PatientShareCode)
+        .filter(
+            models.PatientShareCode.patient_id == patient_id,
+            models.PatientShareCode.revoked == False,  # noqa: E712
+            models.PatientShareCode.expires_at > datetime.utcnow(),
+        )
+        .order_by(models.PatientShareCode.created_at.desc())
+        .first()
+    )
+
+
+@router.get("/{patient_id}/share-code", response_model=Optional[schemas.ShareCodeResponse])
+def get_share_code(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """The current active code, or null. Never resurrects an expired one."""
+    _get_owned_patient(patient_id, current_user, db)
+    return _active_code(patient_id, db)
+
+
+@router.post("/{patient_id}/share-code", response_model=schemas.ShareCodeResponse)
+def create_share_code(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Issue a code, replacing any existing active one.
+
+    One active code per patient: two live codes for the same patient is a state
+    nobody can reason about, and 'regenerate' is the only thing a caregiver ever
+    wants when a code has gone astray. Superseding immediately is also the fix
+    for a code shared with the wrong person.
+    """
+    _get_owned_patient(patient_id, current_user, db)
+
+    existing = _active_code(patient_id, db)
+    if existing:
+        existing.revoked = True
+
+    share = models.PatientShareCode(
+        code=_generate_code(db),
+        patient_id=patient_id,
+        created_by=current_user.id,
+        expires_at=datetime.utcnow() + timedelta(days=_CODE_TTL_DAYS),
+    )
+    db.add(share)
+    db.commit()
+    db.refresh(share)
+    return share
+
+
+@router.delete("/{patient_id}/share-code", status_code=204)
+def revoke_share_code(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Stop the code working. Does NOT remove clinicians who already redeemed —
+    that's the /clinicians endpoints below, and the UI must not conflate them."""
+    _get_owned_patient(patient_id, current_user, db)
+    existing = _active_code(patient_id, db)
+    if existing:
+        existing.revoked = True
+        db.commit()
+    return None
+
+
+@router.get("/{patient_id}/clinicians", response_model=List[schemas.LinkedClinician])
+def list_linked_clinicians(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Who can currently see this patient. Consent is only meaningful if the
+    caregiver can see what they've granted, so this is not optional UI."""
+    _get_owned_patient(patient_id, current_user, db)
+    rows = (
+        db.query(models.ClinicianPatientLink, models.User)
+        .join(models.User, models.User.id == models.ClinicianPatientLink.clinician_id)
+        .filter(models.ClinicianPatientLink.patient_id == patient_id)
+        .order_by(models.ClinicianPatientLink.created_at.asc())
+        .all()
+    )
+    return [
+        {
+            "clinician_id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "linked_at": link.created_at,
+        }
+        for link, user in rows
+    ]
+
+
+@router.delete("/{patient_id}/clinicians/{clinician_id}", status_code=204)
+def revoke_clinician_access(
+    patient_id: int,
+    clinician_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Cut off a clinician who already has access. Takes effect on their next
+    request — the portal re-checks the link on every call rather than trusting
+    a token, so there is no window where a revoked clinician still reads data."""
+    _get_owned_patient(patient_id, current_user, db)
+    link = (
+        db.query(models.ClinicianPatientLink)
+        .filter(
+            models.ClinicianPatientLink.patient_id == patient_id,
+            models.ClinicianPatientLink.clinician_id == clinician_id,
+        )
+        .first()
+    )
+    if link:
+        db.delete(link)
+        db.commit()
+    return None

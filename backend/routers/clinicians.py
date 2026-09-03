@@ -10,7 +10,9 @@ import schemas
 from auth import get_current_clinician
 from services.aggregation import (
     build_patient_aggregate,
+    build_adherence_series,
     build_flags,
+    build_symptom_series,
     build_trajectory,
     build_temporal_bins,
     build_top_flag,
@@ -25,6 +27,10 @@ from services.aggregation import (
 )
 
 router = APIRouter()
+
+# Window the roster summarises. Matches the portal's default so a patient's row
+# and their dashboard describe the same period.
+ROSTER_WINDOW_DAYS = 30
 
 
 def _get_linked_patient(patient_id: int, current_user: models.User, db: Session) -> models.Patient:
@@ -70,16 +76,89 @@ def _note_badges(period: dict) -> List[str]:
 
 @router.get("/patients", response_model=List[schemas.ClinicianPatientSummary])
 def get_clinician_patients(
+    window_days: int = Query(default=ROSTER_WINDOW_DAYS),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_clinician),
 ):
+    """The clinician's roster. Returns every linked patient with enough signal to
+    triage the panel at a glance — flag counts, adherence, a severity sparkline
+    and the single loudest concern.
+
+    Search and diagnosis filtering are deliberately NOT done here: a pilot-sized
+    panel fits in one response, and filtering client-side keeps typing instant
+    with no request per keystroke. Revisit if a panel ever outgrows one page.
+
+    Every number comes from build_patient_aggregate and build_flags — the same
+    functions the portal uses — so a patient's roster row can never disagree
+    with their own dashboard.
+    """
     patients = (
         db.query(models.Patient)
         .join(models.ClinicianPatientLink, models.ClinicianPatientLink.patient_id == models.Patient.id)
         .filter(models.ClinicianPatientLink.clinician_id == current_user.id)
+        .order_by(models.Patient.name.asc())
         .all()
     )
-    return patients
+
+    severity_rank = {"high": 0, "moderate": 1, "low": 2}
+    roster = []
+    for patient in patients:
+        agg = build_patient_aggregate(patient.id, window_days=window_days, db=db)
+        flags = build_flags(agg)
+
+        counts = {"high": 0, "moderate": 0, "low": 0}
+        for f in flags:
+            counts[f["severity"]] += 1
+
+        # flags is already severity-sorted by build_flags; the first entry is the
+        # loudest thing about this patient.
+        top_concern = flags[0]["text"] if flags else None
+
+        total_sum = sum(s["severity_sum"] for s in agg["symptom_stats"].values())
+        total_count = sum(s["severity_count"] for s in agg["symptom_stats"].values())
+        avg_symptom_severity = round(total_sum / total_count, 1) if total_count else None
+
+        trajectory = build_trajectory(agg["logs"], agg["window"]["start"], agg["window"]["end"])
+        logged_dates = [log.date for log in agg["logs"]]
+
+        roster.append({
+            "id": patient.id,
+            "name": patient.name,
+            "age": _age_from_dob(patient.date_of_birth),
+            "diagnosis": patient.diagnosis,
+            "days_logged": agg["days_logged"],
+            "days_in_window": agg["window"]["days"],
+            "last_log_date": max(logged_dates) if logged_dates else None,
+            "high_flags": counts["high"],
+            "moderate_flags": counts["moderate"],
+            "low_flags": counts["low"],
+            "top_concern": top_concern,
+            "adherence_pct": agg["adherence_totals"]["pct"] if agg["adherence_totals"]["expected"] else None,
+            "avg_symptom_severity": avg_symptom_severity,
+            "severity_series": [d["severity"] for d in trajectory],
+        })
+
+    # Most-urgent first so the panel self-triages, then by name for stability.
+    roster.sort(key=lambda r: (-r["high_flags"], -r["moderate_flags"], r["name"].lower()))
+    return roster
+
+
+@router.get("/diagnoses", response_model=List[str])
+def get_clinician_diagnoses(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_clinician),
+):
+    """Distinct diagnoses across this clinician's panel, for the roster's filter
+    control. Derived from real data rather than a fixed list, since diagnosis is
+    free text entered by the caregiver at onboarding."""
+    rows = (
+        db.query(models.Patient.diagnosis)
+        .join(models.ClinicianPatientLink, models.ClinicianPatientLink.patient_id == models.Patient.id)
+        .filter(models.ClinicianPatientLink.clinician_id == current_user.id)
+        .distinct()
+        .all()
+    )
+    return sorted({(r[0] or "").strip() for r in rows if (r[0] or "").strip()}, key=str.lower)
 
 
 @router.get("/patient/{patient_id}/portal", response_model=schemas.ClinicianPortalResponse)
@@ -91,18 +170,17 @@ def get_clinician_portal(
 ):
     patient = _get_linked_patient(patient_id, current_user, db)
 
+    # `agg["window"]["days"]` is now exactly `window_days` (build_patient_aggregate
+    # anchors an inclusive window), so the portal's "Last N days" label, the
+    # percentage denominators, and the actual queried span all agree. Do not
+    # overwrite it here — that was what let days_logged exceed days_in_window.
     agg = build_patient_aggregate(patient_id, window_days=window_days, db=db)
-    # `agg["window"]["days"]` is the literal inclusive-date-math span (31 for a
-    # "trailing 30 days" request — the same convention app/summary/page.tsx's own
-    # 30-day button already uses). The portal labels this "Last N days", so it
-    # should echo the requested window size exactly rather than the raw count.
-    agg["window"]["days"] = window_days
     flags = build_flags(agg)
 
     # Immediately-preceding window of the same length, purely for period-over-period
     # deltas. Never surfaced to the client directly, only diffed against.
     prior_end = agg["window"]["start"] - timedelta(days=1)
-    prior_start = prior_end - timedelta(days=window_days)
+    prior_start = prior_end - timedelta(days=window_days - 1)
     prior_agg = build_patient_aggregate(patient_id, db=db, start_date=prior_start, end_date=prior_end)
 
     def _avg_symptom_severity(a: dict) -> Optional[float]:
@@ -252,6 +330,12 @@ def get_clinician_portal(
         "trajectory": {"days": trajectory_days},
         "top_flag": top_flag,
         "symptom_frequency": symptom_frequency,
+        "symptom_series": build_symptom_series(
+            agg["logs"], agg["window"]["start"], agg["window"]["end"]
+        ),
+        "adherence_series": build_adherence_series(
+            agg["logs"], agg["window"]["start"], agg["window"]["end"]
+        ),
         "med_adherence": med_adherence,
         "recent_notes": recent_notes,
     }
@@ -355,3 +439,55 @@ def get_clinician_log(
     data = {f: getattr(log, f) for f in schemas.DailyLogResponse.model_fields}
     data["medications_taken"] = medications_taken
     return schemas.DailyLogResponse(**data)
+
+
+@router.post("/redeem", response_model=schemas.RedeemCodeResponse)
+def redeem_share_code(
+    body: schemas.RedeemCodeRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_clinician),
+):
+    """Exchange a caregiver-issued code for read-only access to one patient.
+
+    Normalises input before matching — codes get read aloud and retyped, so
+    case and the hyphen are not something to fail a clinician over. Everything
+    else is strict: an unknown, expired or revoked code returns the same
+    message, so this can't be used to probe which codes exist.
+    """
+    raw = (body.code or "").strip().upper().replace(" ", "")
+    if "-" not in raw and len(raw) == 8:
+        raw = f"{raw[:4]}-{raw[4:]}"
+
+    share = (
+        db.query(models.PatientShareCode)
+        .filter(models.PatientShareCode.code == raw)
+        .first()
+    )
+    if (
+        not share
+        or share.revoked
+        or share.expires_at <= datetime.utcnow()
+    ):
+        raise HTTPException(status_code=404, detail="That code isn't valid. Ask for a new one.")
+
+    patient = db.query(models.Patient).filter(models.Patient.id == share.patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="That code isn't valid. Ask for a new one.")
+
+    existing = (
+        db.query(models.ClinicianPatientLink)
+        .filter(
+            models.ClinicianPatientLink.clinician_id == current_user.id,
+            models.ClinicianPatientLink.patient_id == patient.id,
+        )
+        .first()
+    )
+    # Idempotent: redeeming twice is a no-op, not an error. A clinician who
+    # isn't sure whether it worked will try again, and that must be safe.
+    if not existing:
+        db.add(models.ClinicianPatientLink(clinician_id=current_user.id, patient_id=patient.id))
+        share.redemption_count = (share.redemption_count or 0) + 1
+        share.last_redeemed_at = datetime.utcnow()
+        db.commit()
+
+    return {"patient_id": patient.id, "patient_name": patient.name}
