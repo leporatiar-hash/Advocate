@@ -133,6 +133,18 @@ export default function SettingsPage() {
         />
 
         <SettingsRow
+          href="/settings/sharing"
+          iconBg="#F0FDF4"
+          title="Share with a clinician"
+          subtitle="Give your doctor read-only access with a code"
+          icon={
+            <svg className="w-5 h-5" style={{ color: "#15803D" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342a3 3 0 100-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684zm0-12.632a3 3 0 105.368-2.684 3 3 0 00-5.368 2.684z" />
+            </svg>
+          }
+        />
+
+        <SettingsRow
           href="/settings/treatment-plan"
           iconBg="#EFF6FF"
           title="Treatment Plan"
