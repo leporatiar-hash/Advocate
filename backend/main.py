@@ -48,12 +48,29 @@ _BACKFILL_CONTACTS_CREATED_AT = """
 UPDATE social_contacts SET created_at = NOW() WHERE created_at IS NULL
 """
 
-with engine.connect() as conn:
-    for stmt in _MIGRATIONS:
-        conn.execute(text(stmt))
-    conn.execute(text(_SEED_DEFAULT_CONTACTS))
-    conn.execute(text(_BACKFILL_CONTACTS_CREATED_AT))
-    conn.commit()
+# These patch *existing* Postgres deployments; a fresh database gets everything
+# it needs from create_all above. The syntax is Postgres-specific throughout
+# (ADD COLUMN IF NOT EXISTS, ALTER TYPE, NOW(), VALUES ... AS), so on any other
+# dialect they are both unnecessary and unparseable — skip them rather than
+# forcing local dev to stand up Postgres just to boot.
+if engine.dialect.name == "postgresql":
+    with engine.connect() as conn:
+        for stmt in _MIGRATIONS:
+            # Individually guarded: one unapplicable migration (a table that
+            # doesn't exist yet on a fresh deploy, an enum value already added
+            # outside this list) must not take down startup for all the others.
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001 — best-effort by design
+                conn.rollback()
+                print(f"[migration skipped] {stmt} -> {type(exc).__name__}: {exc}")
+        conn.execute(text(_SEED_DEFAULT_CONTACTS))
+        conn.execute(text(_BACKFILL_CONTACTS_CREATED_AT))
+        conn.commit()
+else:
+    print(f"[migrations] dialect is {engine.dialect.name!r}, not postgresql — "
+          "skipping Postgres-only column migrations (create_all covers a fresh DB)")
 
 app = FastAPI(title="TrueFit Meds API", version="1.0.0")
 
