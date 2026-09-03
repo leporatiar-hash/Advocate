@@ -24,6 +24,24 @@ const inputStyle = (focused: boolean): React.CSSProperties => ({
 export default function RegisterPage() {
   const router = useRouter();
   const { login } = useAuth();
+
+  // Clinician accounts are created through /register?role=clinician rather than
+  // a visible role picker. Registering as a clinician grants access to nothing
+  // on its own — a clinician only ever sees patients whose caregiver handed
+  // them a share code — but there's no reason to advertise the path either.
+  //
+  // Read at submit time from window.location rather than useSearchParams():
+  // under `output: "export"` that hook forces the page into a Suspense boundary
+  // or the build fails outright. At submit we are definitively on the client,
+  // so this needs no hook, no boundary, and no SSR guard. Anything other than
+  // the exact string "clinician" falls through to caregiver, so a mistyped URL
+  // cannot create an account with the wrong role.
+  function requestedRole(): "caregiver" | "clinician" {
+    if (typeof window === "undefined") return "caregiver";
+    return new URLSearchParams(window.location.search).get("role") === "clinician"
+      ? "clinician"
+      : "caregiver";
+  }
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -43,10 +61,13 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      const res = await api.register({ name, email, password, role: "caregiver" }) as AuthResponse;
+      const role = requestedRole();
+      const res = await api.register({ name, email, password, role }) as AuthResponse;
       login(res.user, res.access_token);
       toast.success(`Welcome, ${res.user.name}!`);
-      router.push("/onboarding");
+      // Caregiver onboarding sets up a patient, which makes no sense for a
+      // clinician — they get patients only by redeeming a share code.
+      router.push(role === "clinician" ? "/clinician" : "/onboarding");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Registration failed");
     } finally {
