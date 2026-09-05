@@ -443,6 +443,36 @@ export interface AdherenceSeriesBlock {
   values: (number | null)[];
 }
 
+export interface SymptomDelta {
+  symptom: string;
+  dates: string[];
+  values: (number | null)[];
+  baseline_date: string | null;
+  baseline_value: number | null;
+  current_date: string | null;
+  current_value: number | null;
+  delta: number | null;
+  low_n: boolean;
+}
+
+export interface AdherenceDelta {
+  dates: string[];
+  values: (number | null)[];
+  baseline_date: string | null;
+  baseline_value: number | null;
+  current_date: string | null;
+  current_value: number | null;
+  delta: number | null;
+  low_n: boolean;
+}
+
+export interface SymptomTickerResponse {
+  delta_window_days: number;
+  chart_window_days: number;
+  symptoms: SymptomDelta[];
+  adherence: AdherenceDelta;
+}
+
 export interface TopFlag {
   date: string;
   text: string;

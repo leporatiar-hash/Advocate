@@ -211,6 +211,10 @@ export const api = {
     request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
   getClinicianTemporal: (patientId: number) =>
     request(`/clinicians/patient/${patientId}/temporal`),
+  getSymptomTicker: (patientId: number, deltaWindowDays = 30, chartWindowDays = 365) =>
+    request(
+      `/clinicians/patient/${patientId}/symptom-ticker?delta_window_days=${deltaWindowDays}&chart_window_days=${chartWindowDays}`
+    ),
   getClinicianLog: (patientId: number, dateStr: string) =>
     request(`/clinicians/patient/${patientId}/log/${dateStr}`),
 };

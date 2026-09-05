@@ -561,6 +561,40 @@ class AdherenceSeriesBlock(BaseModel):
     values: List[Optional[float]]
 
 
+class SymptomDelta(BaseModel):
+    symptom: str
+    dates: List[str]
+    values: List[Optional[float]]
+    baseline_date: Optional[str] = None
+    baseline_value: Optional[float] = None
+    current_date: Optional[str] = None
+    current_value: Optional[float] = None
+    delta: Optional[float] = None
+    low_n: bool = False
+
+
+class AdherenceDelta(BaseModel):
+    dates: List[str]
+    values: List[Optional[float]]
+    baseline_date: Optional[str] = None
+    baseline_value: Optional[float] = None
+    current_date: Optional[str] = None
+    current_value: Optional[float] = None
+    delta: Optional[float] = None
+    low_n: bool = False
+
+
+class SymptomTickerResponse(BaseModel):
+    """Backs the clinician dashboard's Quick View — an uncapped, delta-ranked
+    alternative to symptom_series below. There is no stored 'visit' anywhere
+    in the data model, so delta_window_days is a fixed trailing window
+    standing in for one."""
+    delta_window_days: int
+    chart_window_days: int
+    symptoms: List[SymptomDelta]
+    adherence: AdherenceDelta
+
+
 class ClinicianPortalResponse(BaseModel):
     window: PortalWindow
     patient: PortalPatient

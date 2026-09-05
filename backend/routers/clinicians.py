@@ -12,11 +12,13 @@ from services.aggregation import (
     build_patient_aggregate,
     build_adherence_series,
     build_flags,
+    build_symptom_deltas,
     build_symptom_series,
     build_trajectory,
     build_temporal_bins,
     build_top_flag,
     combine_bin_severity,
+    compute_delta,
     group_observation_periods,
     raw_trend,
     symptom_trend,
@@ -338,6 +340,59 @@ def get_clinician_portal(
         ),
         "med_adherence": med_adherence,
         "recent_notes": recent_notes,
+    }
+
+
+@router.get("/patient/{patient_id}/symptom-ticker", response_model=schemas.SymptomTickerResponse)
+def get_symptom_ticker(
+    patient_id: int,
+    delta_window_days: int = Query(default=30),
+    chart_window_days: int = Query(default=365),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_clinician),
+):
+    """Backs the dashboard's Quick View (SymptomTicker.tsx) — an uncapped,
+    delta-ranked alternative to /portal's symptom_series, which is capped at
+    MAX_CHARTED_SYMPTOMS and ranked by logging frequency rather than movement.
+    Finding the symptom that moved most requires seeing every symptom's delta
+    before any of them can be discarded, so this deliberately doesn't reuse
+    that capped/ranked series.
+
+    There is no stored 'visit' anywhere in the data model — TreatmentPlan only
+    tracks a single upcoming appointment, overwritten on every edit, never a
+    history of past ones. `delta_window_days` is a fixed trailing window
+    standing in for "since the last visit", not a real visit anchor.
+    """
+    _get_linked_patient(patient_id, current_user, db)
+
+    today = datetime.now().date()
+    chart_start = today - timedelta(days=chart_window_days)
+
+    logs = (
+        db.query(models.DailyLog)
+        .filter(
+            models.DailyLog.patient_id == patient_id,
+            models.DailyLog.date >= chart_start,
+            models.DailyLog.date <= today,
+        )
+        .order_by(models.DailyLog.date.asc())
+        .all()
+    )
+
+    symptoms = build_symptom_deltas(logs, chart_start, today, delta_window_days)
+    adherence_series = build_adherence_series(logs, chart_start, today)
+    window_start_iso = (today - timedelta(days=delta_window_days)).isoformat()
+    adherence = {
+        **compute_delta(adherence_series["dates"], adherence_series["values"], window_start_iso),
+        "dates": adherence_series["dates"],
+        "values": adherence_series["values"],
+    }
+
+    return {
+        "delta_window_days": delta_window_days,
+        "chart_window_days": chart_window_days,
+        "symptoms": symptoms,
+        "adherence": adherence,
     }
 
 

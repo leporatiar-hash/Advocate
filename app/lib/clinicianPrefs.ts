@@ -29,8 +29,11 @@ export interface ClinicianModule {
   on: boolean;
 }
 
+export type ViewMode = "detailed" | "quick";
+
 export interface ClinicianPrefs {
   modules: ClinicianModule[];
+  viewMode: ViewMode;
 }
 
 /** Display metadata, kept out of storage so labels can change without a
@@ -49,6 +52,7 @@ export const MODULE_META: { id: ModuleId; label: string; description: string }[]
 
 export const DEFAULT_CLINICIAN_PREFS: ClinicianPrefs = {
   modules: MODULE_META.map((m) => ({ id: m.id, on: true })),
+  viewMode: "detailed",
 };
 
 export function moduleLabel(id: ModuleId): string {
@@ -60,16 +64,17 @@ export function moduleDescription(id: ModuleId): string {
 }
 
 /**
- * Reconcile a stored list against the known module set: drop entries that no
- * longer exist, and append modules added since the prefs were saved (on by
- * default, so a new section is never invisible to someone with saved prefs).
+ * Reconcile a stored prefs object against the known module set: drop entries
+ * that no longer exist, and append modules added since the prefs were saved
+ * (on by default, so a new section is never invisible to someone with saved
+ * prefs). Also backfills `viewMode` for prefs saved before it existed.
  */
-function reconcile(stored: ClinicianModule[]): ClinicianPrefs {
+function reconcile(stored: { modules: ClinicianModule[]; viewMode?: string }): ClinicianPrefs {
   const known = new Set(MODULE_META.map((m) => m.id));
   const seen = new Set<ModuleId>();
   const modules: ClinicianModule[] = [];
 
-  for (const m of stored) {
+  for (const m of stored.modules) {
     if (!known.has(m.id) || seen.has(m.id)) continue;
     seen.add(m.id);
     modules.push({ id: m.id, on: m.on !== false });
@@ -77,7 +82,8 @@ function reconcile(stored: ClinicianModule[]): ClinicianPrefs {
   for (const meta of MODULE_META) {
     if (!seen.has(meta.id)) modules.push({ id: meta.id, on: true });
   }
-  return { modules };
+  const viewMode: ViewMode = stored.viewMode === "quick" ? "quick" : "detailed";
+  return { modules, viewMode };
 }
 
 /** v1 stored four booleans and no ordering. Map them onto the new list. */
@@ -90,12 +96,12 @@ function migrateLegacy(raw: string): ClinicianPrefs | null {
       medAdherence: "showMedAdherence",
       rawNotes: "showRawNotes",
     };
-    return reconcile(
-      MODULE_META.map((meta) => {
+    return reconcile({
+      modules: MODULE_META.map((meta) => {
         const legacyKey = map[meta.id];
         return { id: meta.id, on: legacyKey ? old[legacyKey] !== false : true };
-      })
-    );
+      }),
+    });
   } catch {
     return null;
   }
@@ -106,8 +112,8 @@ export function loadClinicianPrefs(): ClinicianPrefs {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as ClinicianPrefs;
-      if (Array.isArray(parsed?.modules)) return reconcile(parsed.modules);
+      const parsed = JSON.parse(raw) as Partial<ClinicianPrefs>;
+      if (Array.isArray(parsed?.modules)) return reconcile({ modules: parsed.modules, viewMode: parsed.viewMode });
       return DEFAULT_CLINICIAN_PREFS;
     }
     const legacy = window.localStorage.getItem(LEGACY_KEY);

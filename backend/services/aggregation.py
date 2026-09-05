@@ -632,6 +632,67 @@ def build_adherence_series(logs, start_date: date_type, end_date: date_type) -> 
     }
 
 
+def compute_delta(dates: list, values: list, window_start_iso: str) -> dict:
+    """Baseline (first) and current (last) non-null value within
+    [window_start, end] of an aligned (dates, values) series, and the delta
+    between them. Below TREND_LOW_N_DAYS distinct scored days in that span,
+    the comparison is noise — the same low_n gate symptom_trend already
+    applies to period-over-period deltas elsewhere on this page.
+    """
+    in_window = [(d, v) for d, v in zip(dates, values) if d >= window_start_iso and v is not None]
+    low_n = len(in_window) < TREND_LOW_N_DAYS
+    if not in_window:
+        return {
+            "baseline_date": None, "baseline_value": None,
+            "current_date": None, "current_value": None,
+            "delta": None, "low_n": True,
+        }
+    baseline_date, baseline_value = in_window[0]
+    current_date, current_value = in_window[-1]
+    delta = None if low_n else round(current_value - baseline_value, 1)
+    return {
+        "baseline_date": baseline_date, "baseline_value": baseline_value,
+        "current_date": current_date, "current_value": current_value,
+        "delta": delta, "low_n": low_n,
+    }
+
+
+def build_symptom_deltas(logs, chart_start: date_type, chart_end: date_type, delta_window_days: int) -> list:
+    """Every symptom scored anywhere in [chart_start, chart_end], each with a
+    full daily series (for charting) plus a baseline-vs-current delta computed
+    over the trailing `delta_window_days`. Uncapped and unranked by design —
+    unlike build_symptom_series (capped at MAX_CHARTED_SYMPTOMS, ranked by
+    logging frequency), the symptom ticker ranks by movement, which requires
+    seeing every symptom's delta before any of them can be discarded.
+    """
+    by_symptom: dict = defaultdict(dict)
+    for log in logs:
+        for s in (log.symptoms or []):
+            sev = s.get("severity")
+            if sev is None:
+                continue
+            by_symptom[s["name"]][log.date] = sev
+
+    dates = []
+    d = chart_start
+    while d <= chart_end:
+        dates.append(d)
+        d += timedelta(days=1)
+    date_strs = [d.isoformat() for d in dates]
+    window_start_iso = (chart_end - timedelta(days=delta_window_days)).isoformat()
+
+    result = []
+    for name, values in by_symptom.items():
+        series_values = [values.get(d) for d in dates]
+        result.append({
+            "symptom": name,
+            "dates": date_strs,
+            "values": series_values,
+            **compute_delta(date_strs, series_values, window_start_iso),
+        })
+    return result
+
+
 def build_top_flag(observation_periods: list, symptom_stats: dict) -> Optional[dict]:
     """The single flag a clinician should read first, deterministically picked
     (no LLM, no synthesized description). A note only qualifies if it carries

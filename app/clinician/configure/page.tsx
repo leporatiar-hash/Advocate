@@ -13,7 +13,13 @@ import {
   moduleDescription,
   DEFAULT_CLINICIAN_PREFS,
   type ClinicianPrefs,
+  type ViewMode,
 } from "../../lib/clinicianPrefs";
+
+const VIEW_MODES: { id: ViewMode; label: string; description: string }[] = [
+  { id: "detailed", label: "Detailed", description: "The full module dashboard configured below" },
+  { id: "quick", label: "Quick View", description: "One symptom ticker: what changed in the last 30 days" },
+];
 
 /**
  * Build your view — the clinician's dashboard layout editor.
@@ -52,15 +58,21 @@ export default function ClinicianConfigurePage() {
       const modules = [...prev.modules];
       const [moved] = modules.splice(from, 1);
       modules.splice(to, 0, moved);
-      return { modules };
+      return { ...prev, modules };
     });
     setDirty(true);
   }, []);
 
   const toggle = useCallback((index: number) => {
     setPrefs((prev) => ({
+      ...prev,
       modules: prev.modules.map((m, i) => (i === index ? { ...m, on: !m.on } : m)),
     }));
+    setDirty(true);
+  }, []);
+
+  const setViewMode = useCallback((viewMode: ViewMode) => {
+    setPrefs((prev) => ({ ...prev, viewMode }));
     setDirty(true);
   }, []);
 
@@ -89,9 +101,53 @@ export default function ClinicianConfigurePage() {
           Saved to this browser.
         </p>
 
+        <h2 className="text-sm font-bold uppercase tracking-wide mt-6" style={{ color: "var(--cp-text-muted)" }}>
+          View mode
+        </h2>
         <div
-          className="rounded-xl border mt-5 divide-y"
+          role="radiogroup"
+          aria-label="Dashboard view mode"
+          className="rounded-xl border mt-2 divide-y"
           style={{ background: "#fff", borderColor: "var(--cp-border)" }}
+        >
+          {VIEW_MODES.map((vm) => (
+            <button
+              key={vm.id}
+              role="radio"
+              aria-checked={prefs.viewMode === vm.id}
+              onClick={() => setViewMode(vm.id)}
+              className="w-full flex items-center gap-3 p-3 text-left"
+              style={{ borderColor: "var(--cp-border)" }}
+            >
+              <span
+                className="flex-shrink-0 rounded-full border-2"
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderColor: prefs.viewMode === vm.id ? "var(--cp-teal)" : "var(--cp-border)",
+                  background: prefs.viewMode === vm.id
+                    ? "radial-gradient(circle, var(--cp-teal) 0 40%, transparent 44%)"
+                    : "transparent",
+                }}
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>{vm.label}</p>
+                <p className="text-xs" style={{ color: "var(--cp-text-muted)" }}>{vm.description}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <h2 className="text-sm font-bold uppercase tracking-wide mt-6" style={{ color: "var(--cp-text-muted)" }}>
+          Detailed view layout
+        </h2>
+        <div
+          className="rounded-xl border mt-2 divide-y"
+          style={{
+            background: "#fff",
+            borderColor: "var(--cp-border)",
+            opacity: prefs.viewMode === "quick" ? 0.5 : 1,
+          }}
         >
           {prefs.modules.map((m, i) => (
             <div
