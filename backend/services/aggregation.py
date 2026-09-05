@@ -28,12 +28,57 @@ SAFETY_SYMPTOM_KEYWORDS = (
     "homicid",
     "command hallucination",
     "harm to others",
+    "catatoni",
 )
 
 
 def _is_safety_symptom(name: str) -> bool:
     lowered = name.lower()
     return any(kw in lowered for kw in SAFETY_SYMPTOM_KEYWORDS)
+
+
+# ── Acuity tiers ─────────────────────────────────────────────────────────────
+#
+# There is no fixed symptom vocabulary: a patient's symptom list is generated
+# per-patient by an LLM at onboarding (see generate_config in
+# routers/patients.py) from free text like "Panic Attacks", "Meltdown", or
+# "Cravings" depending on diagnosis. A tier can only ever be a best-effort
+# substring match against whatever wording that patient's config landed on —
+# it is not, and cannot be, authoritative. RED_TIER_KEYWORDS is the same list
+# _is_safety_symptom uses above (aliased, not duplicated, so the two stay in
+# sync); AMBER is a second tier one step down in acuity but still well above
+# routine physical/functional symptoms.
+RED_TIER_KEYWORDS = SAFETY_SYMPTOM_KEYWORDS
+AMBER_TIER_KEYWORDS = (
+    "aggress",
+    "paranoi",
+    "hallucinat",
+    "intrusive thought",
+    "manic",
+    "mania",
+    "anxiety",
+    "anxious",
+    "panic",
+)
+
+
+def symptom_tier(name: str) -> str:
+    """Best-effort acuity tier for a free-form symptom name: 'red' > 'amber' >
+    'routine'. Unmatched names default to 'routine' — never silently upgraded
+    to a more urgent tier on a guess, but see build_tier_warnings for the
+    failure mode this creates: a patient's config naming a red- or amber-tier
+    symptom something these keywords don't catch (e.g. "Voices" instead of
+    "hallucinations") silently lands in routine. That is the load-bearing risk
+    of a keyword-matched tier — it is surfaced to server logs (see
+    get_symptom_ticker), not rendered to the clinician, since it's a gap in
+    our matcher, not information about their patient.
+    """
+    lowered = name.lower()
+    if any(kw in lowered for kw in RED_TIER_KEYWORDS):
+        return "red"
+    if any(kw in lowered for kw in AMBER_TIER_KEYWORDS):
+        return "amber"
+    return "routine"
 
 
 def _calculate_adherence(logs, medications) -> dict:
@@ -657,13 +702,187 @@ def compute_delta(dates: list, values: list, window_start_iso: str) -> dict:
     }
 
 
+# A symptom "persists" rather than merely "holds steady" when its recent
+# average sits above this floor — reuses the temporal strip's own amber
+# boundary (SEV_AMBER_MAX, defined above) so "elevated" means the same
+# severity level everywhere on the portal, not a second arbitrary number.
+PERSISTING_SEVERITY_FLOOR = SEV_AMBER_MAX
+
+# Event ranking for the deterministic (non-LLM) lead choice: lower sorts
+# first. A newly-appearing or persisting-high symptom outranks one that's
+# merely worsening by degree, which outranks anything getting better.
+EVENT_RANK = {"emerged": 0, "persisting": 1, "worsening": 2, "resolved": 3, "improving": 4, "steady": 5}
+TIER_RANK = {"red": 0, "amber": 1, "routine": 2}
+
+
+def bin_days_for_window(window_days: int) -> int:
+    """Same daily/weekly/biweekly/monthly aggregation the chart itself uses
+    (see the frontend's RANGES table in SymptomTicker.tsx) — kept here as the
+    one authoritative mapping so a delta always compares the same *kind* of
+    number the chart is showing for that range: raw daily scores at 1W/1M,
+    an average of averages at 3M and up."""
+    if window_days <= 30:
+        return 1
+    if window_days <= 90:
+        return 7
+    if window_days <= 182:
+        return 14
+    return 30
+
+
+def _edge_mean(pairs: list, from_start: bool, bin_days: int):
+    """Mean of whichever bin_days-wide calendar slice of `pairs` (chronological,
+    non-empty) sits at the start (from_start) or end of the range. bin_days<=1
+    just returns the single edge point unchanged — the 1W/1M case, identical
+    to the old single-point comparison."""
+    edge_date, edge_value = pairs[0] if from_start else pairs[-1]
+    if bin_days <= 1:
+        return edge_date, edge_value
+    if from_start:
+        cutoff = (date_type.fromisoformat(edge_date) + timedelta(days=bin_days)).isoformat()
+        bin_pairs = [(d, v) for d, v in pairs if d < cutoff] or [pairs[0]]
+    else:
+        cutoff = (date_type.fromisoformat(edge_date) - timedelta(days=bin_days)).isoformat()
+        bin_pairs = [(d, v) for d, v in pairs if d > cutoff] or [pairs[-1]]
+    mean_v = round(sum(v for _, v in bin_pairs) / len(bin_pairs), 1)
+    return edge_date, mean_v
+
+
+def find_onset_date(dates: list, values: list, window_start_iso: str, baseline_value, delta) -> Optional[str]:
+    """Start of the current *sustained* run past the halfway point between
+    baseline_value and its final value — the most recent onset, not the
+    earliest. A simple, explainable proxy for "when did this actually start"
+    — not a statistical changepoint detector — used only to order a
+    symptom's onset against adherence's, per get_symptom_ticker's
+    ordering-aware headline clause.
+
+    Deliberately walks backward from the most recent scored day rather than
+    forward from window_start: an isolated historical blip (a single missed
+    dose weeks before any real, ongoing decline) crosses the same threshold
+    in isolation, and scanning forward would misreport that blip as "the
+    onset" of a change that hadn't actually started yet. Walking backward and
+    stopping at the first day that does *not* cross finds where the present
+    state actually began.
+
+    Returns None (can't establish onset) when there's no delta to compare
+    against, or the most recent scored day doesn't even cross the threshold.
+    """
+    if delta is None or baseline_value is None or delta == 0:
+        return None
+    threshold = baseline_value + delta / 2
+    in_window = [(d, v) for d, v in zip(dates, values) if d >= window_start_iso and v is not None]
+
+    onset = None
+    for d, v in reversed(in_window):
+        crossed = (delta > 0 and v >= threshold) or (delta < 0 and v <= threshold)
+        if not crossed:
+            break
+        onset = d
+    return onset
+
+
+def classify_symptom_event(dates: list, values: list, chart_start_iso: str, delta_start_iso: str, bin_days: int = 1) -> dict:
+    """Classifies one symptom's trajectory into an event a clinician would
+    actually ask about, not just a number:
+
+    - emerged: no occurrence anywhere in [chart_start, delta_start) — the
+      whole lookback before the delta window — but at least one in the delta
+      window itself. The most important signal this product can surface, and
+      previously invisible: a symptom with too little data to trust a delta
+      rendered as flat "not enough data" regardless of whether that data was
+      "nothing before, something new" or "always this sparse."
+    - resolved: occurred in the lookback, absent for the whole delta window.
+    - persisting: occurred throughout the delta window at a sustained
+      elevated average (>= PERSISTING_SEVERITY_FLOOR) with no real delta —
+      previously rendered as "no change", which reads as fine. It is not.
+    - worsening / improving: a real delta. At bin_days<=1 (1W/1M) this is a
+      raw first-vs-last daily score, same as before. At bin_days>1 (3M and
+      up, matching the chart's own weekly/biweekly/monthly aggregation) it's
+      the mean of the window's first bin vs. its last bin — a change in
+      averages, not in any single observed score, and the caller is
+      responsible for phrasing that difference (see ticker_headline.py).
+    - steady: occurred in both halves but there isn't enough data in the
+      delta window (< TREND_LOW_N_DAYS distinct SCORED days, regardless of
+      bin_days — binning changes which number the delta compares, never how
+      much raw evidence is required to trust one at all) to trust a
+      direction, or the change is negligible.
+
+    NOTE ON HONESTY: "emerged" only means "not logged in [chart_start,
+    delta_start)" — i.e. not logged in however far back the caller actually
+    queried (see chart_window_days in get_symptom_ticker), never "first time
+    ever." The caller is responsible for phrasing that limit truthfully
+    rather than as "first occurrence."
+    """
+    prior = [(d, v) for d, v in zip(dates, values) if chart_start_iso <= d < delta_start_iso and v is not None]
+    recent = [(d, v) for d, v in zip(dates, values) if d >= delta_start_iso and v is not None]
+
+    has_prior = len(prior) > 0
+    has_recent = len(recent) > 0
+
+    if has_recent and not has_prior:
+        current_date, current_value = _edge_mean(recent, from_start=False, bin_days=bin_days)
+        return {
+            "event": "emerged",
+            "baseline_date": None, "baseline_value": None,
+            "current_date": current_date, "current_value": current_value,
+            "delta": None, "low_n": False,
+        }
+
+    if has_prior and not has_recent:
+        baseline_date, baseline_value = _edge_mean(prior, from_start=False, bin_days=bin_days)
+        return {
+            "event": "resolved",
+            "baseline_date": baseline_date, "baseline_value": baseline_value,
+            "current_date": None, "current_value": None,
+            "delta": None, "low_n": False,
+        }
+
+    if not has_prior and not has_recent:
+        # Can't occur in practice — by_symptom only ever contains symptoms
+        # with at least one occurrence somewhere in the queried range — but
+        # handled rather than assumed away.
+        return {
+            "event": "steady",
+            "baseline_date": None, "baseline_value": None,
+            "current_date": None, "current_value": None,
+            "delta": None, "low_n": True,
+        }
+
+    low_n = len(recent) < TREND_LOW_N_DAYS
+    if low_n:
+        return {
+            "event": "steady",
+            "baseline_date": None, "baseline_value": None,
+            "current_date": None, "current_value": None,
+            "delta": None, "low_n": True,
+        }
+
+    baseline_date, baseline_value = _edge_mean(recent, from_start=True, bin_days=bin_days)
+    current_date, current_value = _edge_mean(recent, from_start=False, bin_days=bin_days)
+    avg_recent = sum(v for _, v in recent) / len(recent)
+    delta = round(current_value - baseline_value, 1)
+    if abs(delta) < 0.5:
+        event = "persisting" if avg_recent >= PERSISTING_SEVERITY_FLOOR else "steady"
+    else:
+        event = "worsening" if delta > 0 else "improving"
+
+    return {
+        "event": event,
+        "baseline_date": baseline_date, "baseline_value": baseline_value,
+        "current_date": current_date, "current_value": current_value,
+        "delta": delta, "low_n": low_n,
+    }
+
+
 def build_symptom_deltas(logs, chart_start: date_type, chart_end: date_type, delta_window_days: int) -> list:
     """Every symptom scored anywhere in [chart_start, chart_end], each with a
-    full daily series (for charting) plus a baseline-vs-current delta computed
-    over the trailing `delta_window_days`. Uncapped and unranked by design —
-    unlike build_symptom_series (capped at MAX_CHARTED_SYMPTOMS, ranked by
-    logging frequency), the symptom ticker ranks by movement, which requires
-    seeing every symptom's delta before any of them can be discarded.
+    full daily series (for charting), an acuity tier, and an event
+    classification computed over the trailing `delta_window_days` (bin size
+    for that classification derived from the window itself — see
+    bin_days_for_window). Uncapped and unranked by design — unlike
+    build_symptom_series (capped at MAX_CHARTED_SYMPTOMS, ranked by logging
+    frequency), the symptom ticker ranks by tier and event, which requires
+    seeing every symptom before any of them can be discarded.
     """
     by_symptom: dict = defaultdict(dict)
     for log in logs:
@@ -679,18 +898,90 @@ def build_symptom_deltas(logs, chart_start: date_type, chart_end: date_type, del
         dates.append(d)
         d += timedelta(days=1)
     date_strs = [d.isoformat() for d in dates]
-    window_start_iso = (chart_end - timedelta(days=delta_window_days)).isoformat()
+    chart_start_iso = chart_start.isoformat()
+    # Inclusive of both endpoints, matching build_patient_aggregate's own
+    # "a window_days-day request spans exactly window_days calendar days"
+    # convention (see its comment) — so an N-day delta window is the same N
+    # calendar days [today-(N-1), today] the frontend's range buttons slice
+    # the chart to, and the two describe the same span exactly.
+    delta_start_iso = (chart_end - timedelta(days=delta_window_days - 1)).isoformat()
+    bin_days = bin_days_for_window(delta_window_days)
 
     result = []
     for name, values in by_symptom.items():
         series_values = [values.get(d) for d in dates]
         result.append({
             "symptom": name,
+            "tier": symptom_tier(name),
             "dates": date_strs,
             "values": series_values,
-            **compute_delta(date_strs, series_values, window_start_iso),
+            **classify_symptom_event(date_strs, series_values, chart_start_iso, delta_start_iso, bin_days),
         })
     return result
+
+
+def build_tier_warnings(symptom_deltas: list, delta_start_iso: str, window_days: int) -> list:
+    """Surfaces the load-bearing risk of a keyword-matched tier: a symptom
+    whose free-form name matched neither RED_TIER_KEYWORDS nor
+    AMBER_TIER_KEYWORDS (so defaulted to 'routine') but that scored at a
+    level that would matter clinically if it really were unrecognized-red or
+    unrecognized-amber. This is a developer diagnostic about our own keyword
+    matcher, not information about the patient — the caller logs it
+    server-side (see get_symptom_ticker), it must never render in the
+    clinician-facing portal.
+    """
+    warnings = []
+    for s in symptom_deltas:
+        if s["tier"] != "routine":
+            continue
+        recent_values = [v for d, v in zip(s["dates"], s["values"]) if d >= delta_start_iso and v is not None]
+        if recent_values and max(recent_values) >= 8:
+            warnings.append(
+                f"“{s['symptom']}” scored {max(recent_values):.1f}/10 in the last {window_days} days but "
+                "didn't match a known severity tier, so it's being treated as routine."
+            )
+    return warnings
+
+
+def compute_adherence_ordering(lead: Optional[dict], adherence: dict, delta_start_iso: str) -> Optional[dict]:
+    """When the leading symptom is getting worse (emerged/persisting/
+    worsening) and adherence has meaningfully declined in the same window,
+    works out which one actually started first — that ordering is the entire
+    clinical value of mentioning adherence at all (a decline that started
+    after a symptom rose reads as a possible consequence; before, a possible
+    cause). Returns None whenever ordering can't honestly be established —
+    no lead, lead isn't in a worsening family, adherence isn't really
+    declining, or either onset date can't be found — the caller is expected
+    to drop the adherence clause entirely rather than hedge (see
+    services/ticker_headline.py), never falling back to vague "over the same
+    period" phrasing.
+    """
+    if not lead or lead["event"] not in ("emerged", "persisting", "worsening"):
+        return None
+    if adherence.get("delta") is None or adherence["delta"] > -15:
+        return None
+
+    lead_onset = find_onset_date(lead["dates"], lead["values"], delta_start_iso, lead.get("baseline_value"), lead.get("delta"))
+    adherence_onset = find_onset_date(
+        adherence["dates"], adherence["values"], delta_start_iso, adherence.get("baseline_value"), adherence.get("delta")
+    )
+    if not lead_onset or not adherence_onset:
+        return None
+
+    diff_days = abs((date_type.fromisoformat(adherence_onset) - date_type.fromisoformat(lead_onset)).days)
+    if diff_days <= 6:
+        ordering = "same_week"
+    elif adherence_onset < lead_onset:
+        ordering = "adherence_first"
+    else:
+        ordering = "symptom_first"
+
+    return {
+        "ordering": ordering,
+        "lead_symptom": lead["symptom"],
+        "lead_onset": lead_onset,
+        "adherence_onset": adherence_onset,
+    }
 
 
 def build_top_flag(observation_periods: list, symptom_stats: dict) -> Optional[dict]:

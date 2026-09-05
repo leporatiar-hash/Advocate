@@ -443,8 +443,13 @@ export interface AdherenceSeriesBlock {
   values: (number | null)[];
 }
 
+export type SymptomTier = "red" | "amber" | "routine";
+export type SymptomEvent = "emerged" | "resolved" | "persisting" | "worsening" | "improving" | "steady";
+
 export interface SymptomDelta {
   symptom: string;
+  tier: SymptomTier;
+  event: SymptomEvent;
   dates: string[];
   values: (number | null)[];
   baseline_date: string | null;
@@ -471,6 +476,8 @@ export interface SymptomTickerResponse {
   chart_window_days: number;
   symptoms: SymptomDelta[];
   adherence: AdherenceDelta;
+  headline: string;
+  headline_source: "llm" | "fallback";
 }
 
 export interface TopFlag {

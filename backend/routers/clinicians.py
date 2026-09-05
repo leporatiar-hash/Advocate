@@ -1,3 +1,5 @@
+import logging
+import os
 from datetime import date as date_type, datetime, timedelta
 from typing import List, Optional
 
@@ -14,10 +16,13 @@ from services.aggregation import (
     build_flags,
     build_symptom_deltas,
     build_symptom_series,
+    build_tier_warnings,
     build_trajectory,
     build_temporal_bins,
     build_top_flag,
+    bin_days_for_window,
     combine_bin_severity,
+    compute_adherence_ordering,
     compute_delta,
     group_observation_periods,
     raw_trend,
@@ -27,6 +32,9 @@ from services.aggregation import (
     TEMPORAL_WINDOW_DAYS,
     TREND_LOW_N_DAYS,
 )
+from services.ticker_headline import fallback_headline, generate_headline, rank_symptoms
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -362,6 +370,15 @@ def get_symptom_ticker(
     tracks a single upcoming appointment, overwritten on every edit, never a
     history of past ones. `delta_window_days` is a fixed trailing window
     standing in for "since the last visit", not a real visit anchor.
+
+    `delta_window_days` is the range the clinician currently has selected
+    (1W/1M/3M/6M/1Y on the frontend), not a fixed 30 — the headline, the
+    per-symptom deltas, and the clinical-priority ranking all describe
+    whatever window is on screen, recomputed on every range change, never a
+    stale 30-day number under a 6-month chart. `chart_window_days` stays a
+    generous fixed lookback regardless of range (see `emerged`/`resolved` in
+    classify_symptom_event, which need history *before* the delta window to
+    classify against).
     """
     _get_linked_patient(patient_id, current_user, db)
 
@@ -381,18 +398,50 @@ def get_symptom_ticker(
 
     symptoms = build_symptom_deltas(logs, chart_start, today, delta_window_days)
     adherence_series = build_adherence_series(logs, chart_start, today)
-    window_start_iso = (today - timedelta(days=delta_window_days)).isoformat()
+    # -1: inclusive of both endpoints, matching build_symptom_deltas' own
+    # delta_start_iso convention — see its comment.
+    window_start_iso = (today - timedelta(days=delta_window_days - 1)).isoformat()
     adherence = {
         **compute_delta(adherence_series["dates"], adherence_series["values"], window_start_iso),
         "dates": adherence_series["dates"],
         "values": adherence_series["values"],
     }
+    bin_days = bin_days_for_window(delta_window_days)
+
+    # A gap in our own keyword matcher, not information about this patient —
+    # goes to server logs, never the clinician-facing response. See
+    # symptom_tier's docstring for the risk this is catching.
+    for warning in build_tier_warnings(symptoms, window_start_iso, delta_window_days):
+        logger.warning("[symptom-ticker tier] patient=%s %s", patient_id, warning)
+
+    ranked = rank_symptoms(symptoms)
+    lead = ranked[0] if ranked else None
+    ordering = compute_adherence_ordering(lead, adherence, window_start_iso)
+
+    # Live call, tightly bounded: the model sees only the facts already
+    # computed above (symptom/tier/event/from/to, adherence ordering), never a
+    # raw log or note — see services/ticker_headline.py's module docstring for
+    # why this is live rather than batched like the AI Summary module. Any
+    # failure — timeout, missing key, malformed response — falls back to a
+    # deterministic sentence ranked by the same tier/event priority, never a
+    # blank headline.
+    api_key = os.getenv("OPENAI_API_KEY")
+    headline_source = "fallback"
+    headline = fallback_headline(symptoms, adherence, delta_window_days, bin_days, ordering)
+    if api_key:
+        try:
+            headline = generate_headline(symptoms, adherence, delta_window_days, bin_days, api_key, ordering)
+            headline_source = "llm"
+        except Exception as exc:  # noqa: BLE001 — any failure degrades to the deterministic sentence
+            logger.warning("[symptom-ticker headline] LLM call failed, using fallback: %s: %s", type(exc).__name__, exc)
 
     return {
         "delta_window_days": delta_window_days,
         "chart_window_days": chart_window_days,
         "symptoms": symptoms,
         "adherence": adherence,
+        "headline": headline,
+        "headline_source": headline_source,
     }
 
 

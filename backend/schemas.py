@@ -563,6 +563,14 @@ class AdherenceSeriesBlock(BaseModel):
 
 class SymptomDelta(BaseModel):
     symptom: str
+    # Best-effort keyword-matched acuity tier — see symptom_tier in
+    # services/aggregation.py. "routine" includes both genuinely-routine
+    # symptoms and unrecognized names — an unmatched high-severity symptom is
+    # logged server-side (build_tier_warnings), never surfaced here: it's a
+    # gap in our matcher, not information about the patient.
+    tier: str = "routine"
+    # emerged | resolved | persisting | worsening | improving | steady
+    event: str = "steady"
     dates: List[str]
     values: List[Optional[float]]
     baseline_date: Optional[str] = None
@@ -593,6 +601,12 @@ class SymptomTickerResponse(BaseModel):
     chart_window_days: int
     symptoms: List[SymptomDelta]
     adherence: AdherenceDelta
+    # One or two clinical-register sentences — see services/ticker_headline.py.
+    headline: str
+    # "llm" or "fallback" — which path produced `headline`. Not shown to the
+    # clinician; useful for spot-checking whether the LLM call is actually
+    # succeeding in a given environment.
+    headline_source: str = "fallback"
 
 
 class ClinicianPortalResponse(BaseModel):

@@ -4,15 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Lora } from "next/font/google";
 import { api, localDateStr } from "../../lib/api";
 import { CHART_INK, seriesColor } from "../../lib/chartTheme";
-import type { RecentNote, SymptomDelta, SymptomTickerResponse } from "../../lib/types";
+import type { RecentNote, SymptomDelta, SymptomEvent, SymptomTickerResponse } from "../../lib/types";
 import { EmptyState } from "./EmptyState";
 
 const lora = Lora({ subsets: ["latin"], weight: ["500", "600"], style: ["normal", "italic"], display: "swap" });
-
-// There is no stored "visit" anywhere in the data model (see
-// backend/routers/clinicians.py's /symptom-ticker docstring) — this fixed
-// trailing window stands in for "since the last visit" everywhere in this file.
-const DELTA_WINDOW_DAYS = 30;
 
 // Matches the "high" severity bucket used elsewhere on the portal
 // (build_flags, _note_badges) — a day only counts as "elevated" here if it
@@ -24,12 +19,24 @@ const MAX_CHARTED = 5;
 const RISING = "#d03b3b";
 const FALLING = "#0ca30c";
 
-const RANGES: { key: string; label: string; days: number }[] = [
-  { key: "1W", label: "1W", days: 7 },
-  { key: "1M", label: "1M", days: 30 },
-  { key: "3M", label: "3M", days: 90 },
-  { key: "6M", label: "6M", days: 182 },
-  { key: "1Y", label: "1Y", days: 365 },
+// Mirrors TIER_RANK / EVENT_RANK in backend/services/aggregation.py — the
+// list and chart must rank the same way the headline does, or "rank should
+// be visible in the chart" breaks the moment the two disagree. Keep in sync.
+const TIER_RANK: Record<string, number> = { red: 0, amber: 1, routine: 2 };
+const EVENT_RANK: Record<string, number> = {
+  emerged: 0, persisting: 1, worsening: 2, resolved: 3, improving: 4, steady: 5,
+};
+
+// binDays mirrors bin_days_for_window in backend/services/aggregation.py —
+// the chart's own visual binning and the backend's delta-averaging must
+// agree on what a "weekly average" means for the same range, or the chart
+// and the headline's numbers would describe two different things.
+const RANGES: { key: string; label: string; days: number; binDays: number; aggLabel: string }[] = [
+  { key: "1W", label: "1W", days: 7, binDays: 1, aggLabel: "Daily values" },
+  { key: "1M", label: "1M", days: 30, binDays: 1, aggLabel: "Daily values" },
+  { key: "3M", label: "3M", days: 90, binDays: 7, aggLabel: "Weekly average" },
+  { key: "6M", label: "6M", days: 182, binDays: 14, aggLabel: "Biweekly average" },
+  { key: "1Y", label: "1Y", days: 365, binDays: 30, aggLabel: "Monthly average" },
 ];
 
 // One dash pattern per charted slot, in addition to color — with up to five
@@ -41,6 +48,26 @@ function sliceRange<T>(arr: T[], days: number): T[] {
   return arr.slice(Math.max(0, arr.length - days));
 }
 
+/**
+ * Chunks a (dates, values) series into `binDays`-wide bins, mean of whatever
+ * non-null values fall in each bin — a bin with zero scored days stays null,
+ * same "a gap is a gap" rule as everywhere else on this page. Binned from the
+ * END backward so the most recent bin always ends on the last day, regardless
+ * of how evenly `binDays` divides the array length.
+ */
+function downsample(dates: string[], values: (number | null)[], binDays: number): { dates: string[]; values: (number | null)[] } {
+  if (binDays <= 1) return { dates, values };
+  const outDates: string[] = [];
+  const outValues: (number | null)[] = [];
+  for (let end = values.length; end > 0; end -= binDays) {
+    const start = Math.max(0, end - binDays);
+    const chunk = values.slice(start, end).filter((v): v is number => v != null);
+    outValues.unshift(chunk.length ? Math.round((chunk.reduce((a, b) => a + b, 0) / chunk.length) * 10) / 10 : null);
+    outDates.unshift(dates[start]);
+  }
+  return { dates: outDates, values: outValues };
+}
+
 function fmtDate(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00`);
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -48,62 +75,55 @@ function fmtDate(dateStr: string): string {
 
 interface TickerRow extends SymptomDelta {
   absDelta: number;
-  direction: "up" | "down" | "flat" | "new";
 }
 
 function toRows(symptoms: SymptomDelta[]): TickerRow[] {
-  return symptoms.map((s) => ({
-    ...s,
-    absDelta: s.delta == null ? -1 : Math.abs(s.delta),
-    direction: s.low_n || s.delta == null ? "new" : s.delta > 0 ? "up" : s.delta < 0 ? "down" : "flat",
-  }));
+  return symptoms.map((s) => ({ ...s, absDelta: s.delta == null ? -1 : Math.abs(s.delta) }));
 }
 
-/**
- * Plain-sentence summary generated from the numbers already computed above —
- * no LLM call. Deliberately conservative about the adherence correlation: the
- * backend only gives us a window-level adherence delta, not day-by-day
- * causality, so this states "over the same period," not a specific week.
- */
-function buildHeadline(rows: TickerRow[], adherence: SymptomTickerResponse["adherence"]): string {
-  const scored = rows.filter((r) => r.direction !== "new");
-  if (scored.length === 0) {
-    return `Not enough data yet to compare the last ${DELTA_WINDOW_DAYS} days.`;
+function rankKey(s: { tier: string; event: string; delta: number | null }): [number, number, number] {
+  return [TIER_RANK[s.tier] ?? 2, EVENT_RANK[s.event] ?? 5, -Math.abs(s.delta ?? 0)];
+}
+
+function compareRank(a: TickerRow, b: TickerRow): number {
+  const [at, ae, ad] = rankKey(a);
+  const [bt, be, bd] = rankKey(b);
+  return at - bt || ae - be || ad - bd;
+}
+
+function eventLabel(row: TickerRow): { text: string; color: string } {
+  switch (row.event as SymptomEvent) {
+    case "emerged":
+      return { text: "new", color: RISING };
+    case "persisting":
+      return { text: `persisting at ${row.current_value?.toFixed(1) ?? "—"}`, color: RISING };
+    case "worsening":
+      return { text: `up ${row.absDelta.toFixed(1)}`, color: RISING };
+    case "resolved":
+      return { text: "resolved", color: FALLING };
+    case "improving":
+      return { text: `down ${row.absDelta.toFixed(1)}`, color: FALLING };
+    case "steady":
+    default:
+      return { text: "not enough data", color: "var(--cp-text-muted)" };
   }
-
-  const worse = scored.filter((r) => r.direction === "up");
-  const better = scored.filter((r) => r.direction === "down");
-  const changed = scored.filter((r) => r.direction !== "flat");
-
-  if (changed.length === 0) {
-    return `No symptoms have changed in the last ${DELTA_WINDOW_DAYS} days.`;
-  }
-
-  const leadingWorse = worse.length >= better.length;
-  const leadCount = leadingWorse ? worse.length : better.length;
-  const leadWord = leadingWorse ? "worse" : "better";
-  const sentence1 = `${leadCount} of ${scored.length} symptom${scored.length === 1 ? "" : "s"} ${leadCount === 1 ? "is" : "are"} ${leadWord} than ${DELTA_WINDOW_DAYS} days ago.`;
-
-  const maxAbs = Math.max(...changed.map((r) => r.absDelta));
-  const topMovers = changed.filter((r) => r.absDelta === maxAbs);
-  const names = topMovers.map((r) => r.symptom).join(" and ");
-  const verb = topMovers[0].direction === "up" ? "up" : "down";
-  const magnitude = topMovers[0].absDelta.toFixed(1);
-  const pointsWord = magnitude === "1.0" ? "point" : "points";
-  const subjectVerb = topMovers.length === 1 ? "is" : "are both";
-
-  let sentence2 = `${names} ${subjectVerb} ${verb} ${magnitude} ${pointsWord}`;
-  if (adherence.delta != null && adherence.delta <= -15 && worse.length > 0) {
-    sentence2 += ", and medication adherence dropped over the same period.";
-  } else {
-    sentence2 += ".";
-  }
-
-  return `${sentence1} ${sentence2}`;
 }
 
 function elevatedDates(row: TickerRow, deltaStartIso: string): string[] {
   return row.dates.filter((d, i) => d >= deltaStartIso && (row.values[i] ?? -1) >= ELEVATED_SEVERITY);
+}
+
+function TierBadge({ tier }: { tier: string }) {
+  if (tier === "routine") return null;
+  const color = tier === "red" ? RISING : "var(--cp-amber)";
+  return (
+    <span
+      className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full flex-shrink-0"
+      style={{ background: `${color}1A`, color }}
+    >
+      {tier}
+    </span>
+  );
 }
 
 function DashSwatch({ color, dash }: { color: string; dash: number[] }) {
@@ -121,32 +141,29 @@ interface TickerSeries {
   values: (number | null)[];
   color: string;
   dash: number[];
+  weight: number;
 }
 
 /**
  * Bespoke Chart.js instance (rather than the shared TrendChart) because this
- * view needs two things TrendChart doesn't do: a per-series dash pattern, and
- * a reference line marking where the fixed delta window begins. Chart.js is
- * dynamically imported on mount, same as TrendChart — `output: "export"`
- * prerenders this page at build time with no real canvas available.
+ * view needs things TrendChart doesn't do: a per-series dash pattern and
+ * weight, and gap segments styled as deliberate rather than as a broken
+ * line. Chart.js is dynamically imported on mount, same as TrendChart —
+ * `output: "export"` prerenders this page at build time with no real canvas
+ * available.
+ *
+ * No reference-line marker: the delta window and the displayed range are now
+ * always the same window (both driven by the same range button), so there is
+ * no longer a "before" and "after" split within one chart to mark — see
+ * SymptomTicker's range-refetch effect below.
  */
-function TickerChart({
-  dates,
-  series,
-  anchorDateIso,
-  anchorLabel,
-}: {
-  dates: string[];
-  series: TickerSeries[];
-  anchorDateIso: string;
-  anchorLabel: string;
-}) {
+function TickerChart({ dates, series }: { dates: string[]; series: TickerSeries[] }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chartRef = useRef<any>(null);
   const [failed, setFailed] = useState(false);
 
-  const dataKey = useMemo(() => JSON.stringify({ dates, series, anchorDateIso }), [dates, series, anchorDateIso]);
+  const dataKey = useMemo(() => JSON.stringify({ dates, series }), [dates, series]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,33 +176,6 @@ function TickerChart({
         if (cancelled) return;
 
         chartRef.current?.destroy();
-
-        const anchorIndex = dates.indexOf(anchorDateIso);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const anchorPlugin: any = {
-          id: "deltaAnchor",
-          afterDraw(chart: { ctx: CanvasRenderingContext2D; chartArea: { top: number; bottom: number; left: number; right: number }; scales: { x: { getPixelForValue: (i: number) => number } } }) {
-            if (anchorIndex < 0) return;
-            const { ctx, chartArea, scales } = chart;
-            const x = scales.x.getPixelForValue(anchorIndex);
-            if (x < chartArea.left || x > chartArea.right) return;
-            ctx.save();
-            ctx.strokeStyle = CHART_INK.axis;
-            ctx.setLineDash([4, 4]);
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(x, chartArea.top);
-            ctx.lineTo(x, chartArea.bottom);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.fillStyle = CHART_INK.textMuted;
-            ctx.font = "11px Inter, sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText(anchorLabel, x, chartArea.top - 6);
-            ctx.restore();
-          },
-        };
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const config: any = {
@@ -200,22 +190,24 @@ function TickerChart({
               data: s.values,
               borderColor: s.color,
               backgroundColor: s.color,
-              borderWidth: 2,
+              borderWidth: s.weight,
               borderDash: s.dash,
-              tension: 0.3,
+              tension: 0,
               fill: false,
-              spanGaps: false,
-              // Caregivers log intermittently, not daily — with spanGaps off, an
-              // isolated scored day with gaps on both sides gets no line segment
-              // at all, so a flat pointRadius:0 would render it as nothing.
-              // Same isolated-point exception as TrendChart.tsx.
-              pointRadius: (ctx: { dataIndex: number }) => {
-                const v = s.values;
-                const i2 = ctx.dataIndex;
-                if (v[i2] == null) return 0;
-                const isolated = v[i2 - 1] == null && v[i2 + 1] == null;
-                return isolated ? 3 : 0;
+              // Connects across a gap rather than breaking the line outright
+              // (a real day with no neighbor otherwise renders as a stray,
+              // unexplained dot) — but the segment styling below fades and
+              // dashes exactly the spans that cross a gap, so "connected"
+              // still reads as "we don't actually know what happened here",
+              // never as continuous observation.
+              spanGaps: true,
+              segment: {
+                borderDash: (ctx: { p0DataIndex: number; p1DataIndex: number }) =>
+                  ctx.p1DataIndex - ctx.p0DataIndex > 1 ? [2, 3] : s.dash,
+                borderColor: (ctx: { p0DataIndex: number; p1DataIndex: number }) =>
+                  ctx.p1DataIndex - ctx.p0DataIndex > 1 ? `${s.color}55` : s.color,
               },
+              pointRadius: 0,
               pointHoverRadius: 5,
               pointBackgroundColor: s.color,
               pointBorderColor: CHART_INK.surface,
@@ -225,7 +217,7 @@ function TickerChart({
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            layout: { padding: { top: 20 } },
+            layout: { padding: { top: 8 } },
             interaction: { mode: "index", intersect: false },
             scales: {
               y: {
@@ -233,7 +225,7 @@ function TickerChart({
                 max: 10,
                 border: { display: false },
                 grid: { color: CHART_INK.gridline },
-                ticks: { color: CHART_INK.textMuted, font: { size: 11 }, maxTicksLimit: 5 },
+                ticks: { color: CHART_INK.textMuted, font: { size: 11 }, stepSize: 2 },
               },
               x: {
                 border: { color: CHART_INK.axis },
@@ -256,7 +248,6 @@ function TickerChart({
               },
             },
           },
-          plugins: [anchorPlugin],
         };
 
         chartRef.current = new Chart(canvas, config);
@@ -349,16 +340,23 @@ export function SymptomTicker({
 }) {
   const [data, setData] = useState<SymptomTickerResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Separate from `loading`: a range click keeps the previous view visible
+  // (dimmed) rather than blanking to a spinner, since it's now a real
+  // network round-trip — the headline and deltas are recomputed server-side
+  // for whatever range is newly selected, not just re-sliced client-side.
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const [range, setRange] = useState<string>("1M");
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  const activeRange = RANGES.find((r) => r.key === range) ?? RANGES[1];
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    setRefreshing(true);
     setError(false);
     api
-      .getSymptomTicker(patientId, DELTA_WINDOW_DAYS, 365)
+      .getSymptomTicker(patientId, activeRange.days, 365)
       .then((res) => {
         if (!cancelled) setData(res as SymptomTickerResponse);
       })
@@ -366,20 +364,27 @@ export function SymptomTicker({
         if (!cancelled) setError(true);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [patientId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patientId, activeRange.days]);
 
   const notesByDate = useMemo(() => new Map(recentNotes.map((n) => [n.date, n])), [recentNotes]);
 
+  // Matches whatever range is currently selected, not a fixed 30 — the
+  // drill-down's "elevated days" must scope to the same window the headline
+  // and deltas describe.
   const deltaStartIso = useMemo(() => {
     const d = new Date();
-    d.setDate(d.getDate() - DELTA_WINDOW_DAYS);
+    d.setDate(d.getDate() - (activeRange.days - 1));
     return localDateStr(d);
-  }, []);
+  }, [activeRange.days]);
 
   if (loading) {
     return (
@@ -397,18 +402,23 @@ export function SymptomTicker({
   }
 
   const rows = toRows(data.symptoms);
-  const headline = buildHeadline(rows, data.adherence);
-  const changedRows = rows.filter((r) => r.direction === "up" || r.direction === "down");
-  const charted = [...changedRows].sort((a, b) => b.absDelta - a.absDelta).slice(0, MAX_CHARTED);
+  // Steady (insufficient recent data, no real signal) never gets a line —
+  // that was the source of the stray, unconnected dots a sparse symptom like
+  // an occasional side-effect note used to scatter across the chart. Every
+  // other event, including a single-day "emerged", is real signal worth a line.
+  const chartable = rows.filter((r) => r.event !== "steady");
+  const charted = [...chartable].sort(compareRank).slice(0, MAX_CHARTED);
   const chartedIndexBySymptom = new Map(charted.map((c, i) => [c.symptom, i]));
-  const tickerList = [...rows].sort((a, b) => b.absDelta - a.absDelta);
+  const tickerList = [...rows].sort(compareRank);
 
-  const activeRangeDays = RANGES.find((r) => r.key === range)?.days ?? 30;
-  const slicedDates = charted[0] ? sliceRange(charted[0].dates, activeRangeDays) : [];
+  const binned = charted.map((c) =>
+    downsample(sliceRange(c.dates, activeRange.days), sliceRange(c.values, activeRange.days), activeRange.binDays)
+  );
+  const chartDates = binned[0]?.dates ?? [];
 
   return (
-    <div className="space-y-5">
-      {/* Headline */}
+    <div className="space-y-5" style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity 0.15s" }}>
+      {/* Headline — describes whatever range is currently selected */}
       <div
         className={lora.className}
         style={{
@@ -420,13 +430,13 @@ export function SymptomTicker({
           color: "var(--cp-text)",
         }}
       >
-        {headline}
+        {data.headline}
       </div>
 
       {/* Range selector + chart — hidden entirely when nothing changed */}
       {charted.length > 0 && (
         <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
-          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
             <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "var(--cp-border)" }}>
               {RANGES.map((r) => (
                 <button
@@ -447,17 +457,22 @@ export function SymptomTicker({
               {patientName} · {daysLogged} of {daysInWindow} days logged
             </p>
           </div>
+          <p className="text-xs mb-2" style={{ color: "var(--cp-text-muted)" }}>
+            {activeRange.aggLabel}
+          </p>
 
           <TickerChart
-            dates={slicedDates}
+            dates={chartDates}
             series={charted.map((c, i) => ({
               label: c.symptom,
-              values: sliceRange(c.values, activeRangeDays),
+              values: binned[i]?.values ?? [],
               color: seriesColor(i),
               dash: DASH_PATTERNS[i] ?? [],
+              // The single leading (rank-0) symptom draws heavier — same
+              // priority the headline and ticker list already use, made
+              // visible in the chart too, not just the sort order.
+              weight: i === 0 ? 3 : 1.5,
             }))}
-            anchorDateIso={deltaStartIso}
-            anchorLabel={`${DELTA_WINDOW_DAYS} days ago`}
           />
         </div>
       )}
@@ -468,20 +483,13 @@ export function SymptomTicker({
           className="text-[11px] font-bold uppercase tracking-wide px-3 pt-3 pb-1"
           style={{ color: "var(--cp-text-muted)" }}
         >
-          Sorted by change, last {DELTA_WINDOW_DAYS} days
+          Sorted by clinical priority, {activeRange.days === 7 ? "the last week" : `last ${activeRange.days} days`}
         </p>
         {tickerList.map((row) => {
           const chartedIndex = chartedIndexBySymptom.get(row.symptom);
           const isCharted = chartedIndex !== undefined;
           const isExpanded = expanded === row.symptom;
-          const deltaColor =
-            row.direction === "up" ? RISING : row.direction === "down" ? FALLING : "var(--cp-text-muted)";
-          const deltaText =
-            row.direction === "new"
-              ? "not enough data"
-              : row.direction === "flat"
-              ? "no change"
-              : `${row.direction} ${row.absDelta.toFixed(1)}`;
+          const { text: eventText, color: eventColor } = eventLabel(row);
 
           return (
             <div key={row.symptom}>
@@ -494,6 +502,7 @@ export function SymptomTicker({
                   color={isCharted ? seriesColor(chartedIndex) : "var(--cp-text-muted)"}
                   dash={isCharted ? DASH_PATTERNS[chartedIndex] ?? [] : [1, 3]}
                 />
+                <TierBadge tier={row.tier} />
                 <span className="flex-1 text-sm font-semibold truncate" style={{ color: "var(--cp-text)" }}>
                   {row.symptom}
                 </span>
@@ -502,9 +511,9 @@ export function SymptomTicker({
                 </span>
                 <span
                   className="text-sm font-semibold cp-tabular flex-shrink-0 text-right"
-                  style={{ color: deltaColor, minWidth: 100 }}
+                  style={{ color: eventColor, minWidth: 120 }}
                 >
-                  {deltaText}
+                  {eventText}
                 </span>
               </button>
               {isExpanded && (
