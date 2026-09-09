@@ -134,6 +134,12 @@ class TreatmentPlan(Base):
     next_appointment_date = Column(Date, nullable=True)
     next_appointment_with = Column(String, nullable=True)
 
+    # Last appointment — the visit anchor for "since your last visit" framing
+    # on the Quick View headline and its chart marker. Unlike next_appointment_date
+    # this is never overwritten by editing the upcoming one; it's set once a
+    # visit has actually happened. Null until someone records one.
+    last_appointment_date = Column(Date, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

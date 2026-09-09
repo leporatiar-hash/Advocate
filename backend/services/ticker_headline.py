@@ -29,25 +29,38 @@ from services.aggregation import EVENT_RANK, TIER_RANK
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
 SYSTEM_PROMPT = (
-    "You are writing a single pre-visit headline for a psychiatrist about to see "
-    "a patient, from a small JSON blob of already-computed facts about symptom "
-    "changes over a specific window (their last visit, or a fixed lookback if "
-    "no visit date is on record). Every fact — the symptom name, its severity "
-    "tier, its event type, its from/to values, and any adherence ordering — has "
-    "already been computed by the system. You do not compute anything. Your "
-    "only two jobs: choose which fact(s) lead the sentence, and phrase it.\n\n"
+    "You are writing a pre-visit headline for a psychiatrist about to see a "
+    "patient, from a small JSON blob of already-computed facts about symptom "
+    "changes over a specific window (since their last visit, or a fixed "
+    "lookback if no visit date is on record). Every fact — symptom name, "
+    "severity tier, event type, from/to values, adherence ordering, notable "
+    "logged events, and which symptoms held steady — has already been "
+    "computed by the system. You do not compute anything. Your only jobs: "
+    "choose which facts lead, and phrase three fixed slots in order.\n\n"
+    "THREE FIXED SLOTS, always all three, in this order:\n"
+    "A. WHAT MOVED — the single largest clinically-relevant change this "
+    "window, with direction and, if given, when it started.\n"
+    "B. WHAT'S NOTABLE FROM NOTES — drawn ONLY from `notable_events` (episodes, "
+    "severe-symptom days, missed doses — never symptom scores, which slot A "
+    "already covers). If `notable_events` is empty, say plainly that nothing "
+    "else notable was logged this window. Never invent an event not listed.\n"
+    "C. WHAT HELD STEADY — name the symptoms in `steady_symptoms` as unchanged "
+    "this window. If that list is empty, state plainly that nothing else was "
+    "flagged this window — that is itself the information, not something to "
+    "skip past.\n\n"
     "HARD RULES, no exceptions:\n"
-    "1. PRESENT, NEVER DIAGNOSE. State what the data shows, never a clinical "
-    "conclusion or cause. \"Suicidal thoughts have started appearing\" is fine. "
-    "\"Patient is decompensating\" or anything implying a diagnosis or cause is "
-    "not.\n"
-    "2. LEAD WITH WHAT MATTERS MOST, NOT THE BIGGEST NUMBER. A red-tier fact "
-    "(tier='red') always leads over amber, which always leads over routine, "
-    "regardless of how large any routine symptom's numeric change is. Within "
-    "the same tier, 'emerged' and 'persisting' outrank 'worsening', which "
-    "outranks 'improving' or 'resolved'. Never open by counting how many "
-    "symptoms got better if anything red or amber moved, emerged, or "
-    "persisted — that reads as reassurance when it is not.\n"
+    "1. PRESENT, NEVER DIAGNOSE, NEVER RECOMMEND. State what the data shows, "
+    "never a clinical conclusion, cause, or suggested action. \"Suicidal "
+    "thoughts have started appearing\" is fine. \"Patient is decompensating\" "
+    "or \"consider adjusting the dose\" is not — presentation only, never a "
+    "recommendation.\n"
+    "2. SLOT A LEADS WITH WHAT MATTERS MOST, NOT THE BIGGEST NUMBER. A "
+    "red-tier fact (tier='red') always leads over amber, which always leads "
+    "over routine, regardless of how large any routine symptom's numeric "
+    "change is. Within the same tier, 'emerged' and 'persisting' outrank "
+    "'worsening', which outranks 'improving' or 'resolved'. Never open by "
+    "counting how many symptoms got better if anything red or amber moved, "
+    "emerged, or persisted — that reads as reassurance when it is not.\n"
     "3. NUMBERS ARE THE POINT. State the actual from->to values and deltas "
     "you were given — do not omit them, and never invent or adjust a number. "
     "If `granularity` is not \"daily scores\", these numbers are averages (e.g. "
@@ -55,18 +68,17 @@ SYSTEM_PROMPT = (
     "change as a change in that average (\"the weekly average is up...\"), "
     "never imply one day's score moved by that amount.\n"
     "4. ADHERENCE — ONLY IF ORDERING IS GIVEN. Mention medication adherence "
-    "only when `adherence_ordering` is present, and state the ordering exactly "
-    "as given: which one's onset date came first (or that both changed in the "
-    "same week). That ordering — cause-before or consequence-after — is the "
-    "entire reason to mention adherence at all. If `adherence_ordering` is "
-    "null, do not mention adherence, even if its own numbers look like a "
-    "decline — the system already decided the ordering can't be established "
-    "honestly.\n"
-    "5. ONLY USE THE FACTS PROVIDED. Never reference a symptom, value, or "
-    "date that isn't in the input. Never speculate about why something "
+    "in slot A only when `adherence_ordering` is present, and state the "
+    "ordering exactly as given: which one's onset date came first (or that "
+    "both changed in the same week). If `adherence_ordering` is null, do not "
+    "mention adherence, even if its own numbers look like a decline — the "
+    "system already decided the ordering can't be established honestly.\n"
+    "5. ONLY USE THE FACTS PROVIDED. Never reference a symptom, value, event, "
+    "or date that isn't in the input. Never speculate about why something "
     "changed.\n"
-    "6. ONE TO TWO PLAIN SENTENCES. No bullet points, no markdown, no em "
-    "dashes.\n\n"
+    "6. PLAIN SENTENCES, NO MARKDOWN. No bullet points, no em dashes. Three "
+    "to five sentences total across all three slots, reading as one short "
+    "paragraph — not labeled sections.\n\n"
     "Return ONLY valid JSON: {\"headline\": \"...\"} — no markdown fences, no "
     "extra text."
 )
@@ -125,6 +137,18 @@ def _adherence_fact(a: dict) -> dict:
     }
 
 
+def steady_symptoms(symptoms: list) -> list:
+    """Names of symptoms confidently unchanged this window — event == 'steady'
+    AND low_n is False. 'steady' alone conflates two different situations (see
+    classify_symptom_event's docstring): genuinely stable, or just not enough
+    data to say anything. Only the confident case belongs in the "held
+    steady" slot; the low-n case is honestly "we don't know," which is silence,
+    not reassurance, and reporting it as "steady" would be reassurance the
+    data doesn't support.
+    """
+    return [s["symptom"] for s in symptoms if s["event"] == "steady" and not s.get("low_n")]
+
+
 def rank_symptoms(symptoms: list) -> list:
     """Same tier-then-event-then-magnitude priority the LLM is instructed to
     follow (EVENT_RANK/TIER_RANK in aggregation.py) — used both to pick the
@@ -137,13 +161,18 @@ def rank_symptoms(symptoms: list) -> list:
     )
 
 
-def build_headline_prompt(symptoms: list, adherence: dict, window_days: int, bin_days: int, ordering: dict = None) -> tuple:
+def build_headline_prompt(
+    symptoms: list, adherence: dict, window_days: int, bin_days: int,
+    ordering: dict = None, notable_events: list = None,
+) -> tuple:
     payload = {
         "window_label": _window_label(window_days),
         "granularity": _granularity_label(bin_days),
         "symptoms": [_symptom_fact(s) for s in symptoms],
         "adherence": _adherence_fact(adherence),
         "adherence_ordering": ordering,
+        "notable_events": notable_events or [],
+        "steady_symptoms": steady_symptoms(symptoms),
     }
     user_prompt = f"Facts for {payload['window_label']} ({payload['granularity']}):\n{json.dumps(payload, indent=2)}"
     return SYSTEM_PROMPT, user_prompt
@@ -151,7 +180,8 @@ def build_headline_prompt(symptoms: list, adherence: dict, window_days: int, bin
 
 def generate_headline(
     symptoms: list, adherence: dict, window_days: int, bin_days: int, api_key: str,
-    ordering: dict = None, model: str = None, timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    ordering: dict = None, notable_events: list = None, model: str = None,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> str:
     """Single OpenAI call, no retry. Raises on any failure — timeout, network,
     malformed JSON, empty string — the caller (get_symptom_ticker) is
@@ -159,7 +189,7 @@ def generate_headline(
     function never swallows an error itself, so failure mode stays visible to
     whoever's debugging it rather than silently downgraded twice.
     """
-    system_prompt, user_prompt = build_headline_prompt(symptoms, adherence, window_days, bin_days, ordering)
+    system_prompt, user_prompt = build_headline_prompt(symptoms, adherence, window_days, bin_days, ordering, notable_events)
     client = OpenAI(api_key=api_key)
     completion = client.chat.completions.create(
         model=model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
@@ -215,7 +245,33 @@ def _describe_ordering(o: dict, lead_event: str) -> str:
     return f"Both changed in the week of {_fmt_date(earlier)}."
 
 
-def fallback_headline(symptoms: list, adherence: dict, window_days: int, bin_days: int, ordering: dict = None) -> str:
+def _describe_notable(notable_events: list) -> str:
+    if not notable_events:
+        return "No other notable events were logged this window."
+    parts = [
+        f"{', '.join(e['badges'])} on {_fmt_date(e['date'])}"
+        for e in notable_events[:3]
+        if e.get("badges")
+    ]
+    if not parts:
+        return "No other notable events were logged this window."
+    more = len(notable_events) - len(parts)
+    tail = f", and {more} more day{'s' if more != 1 else ''}" if more > 0 else ""
+    return f"The caregiver also logged: {'; '.join(parts)}{tail}."
+
+
+def _describe_steady(steady: list) -> str:
+    if not steady:
+        return "Nothing else was flagged this window."
+    if len(steady) == 1:
+        return f"{steady[0]} held steady."
+    return f"{', '.join(steady[:-1])} and {steady[-1]} held steady."
+
+
+def fallback_headline(
+    symptoms: list, adherence: dict, window_days: int, bin_days: int,
+    ordering: dict = None, notable_events: list = None,
+) -> str:
     """Deterministic headline used when the LLM call fails, times out, or
     OPENAI_API_KEY isn't configured. Ranked by the exact same tier-then-event
     priority the LLM is instructed to follow, so a fallback headline is wrong
@@ -224,15 +280,20 @@ def fallback_headline(symptoms: list, adherence: dict, window_days: int, bin_day
     never hedge on adherence timing with vague "over the same period"
     phrasing — that clause is included only when `ordering` is given, exactly
     as computed, or omitted entirely otherwise.
-    """
-    if not symptoms:
-        return f"Not enough data yet to compare {_window_label(window_days)}."
 
+    Always all three fixed slots (what moved / what's notable / what held
+    steady), same as the LLM path — a fallback should degrade in register,
+    never in structure.
+    """
     ranked = rank_symptoms(symptoms)
     if not ranked:
-        return f"No symptoms have changed in {_window_label(window_days)}."
+        moved = f"Not enough data yet to compare {_window_label(window_days)}."
+    else:
+        lead_sentence = _describe_event(ranked[0], bin_days)
+        tail = f" {_describe_ordering(ordering, ranked[0]['event'])}" if ordering else ""
+        moved = f"{lead_sentence}{tail}"
 
-    lead_sentence = _describe_event(ranked[0], bin_days)
-    tail = f" {_describe_ordering(ordering, ranked[0]['event'])}" if ordering else ""
+    notable = _describe_notable(notable_events or [])
+    steady = _describe_steady(steady_symptoms(symptoms))
 
-    return f"{lead_sentence}{tail}"
+    return f"{moved} {notable} {steady}"

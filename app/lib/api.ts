@@ -211,7 +211,10 @@ export const api = {
     request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
   getClinicianTemporal: (patientId: number) =>
     request(`/clinicians/patient/${patientId}/temporal`),
-  getSymptomTicker: (patientId: number, deltaWindowDays = 30, chartWindowDays = 365) =>
+  // chartWindowDays must exceed the widest delta window (1Y = 365 days) or
+  // there's no real "before" span left to classify emerged/resolved against —
+  // see classify_symptom_event's prior_observed gate in aggregation.py.
+  getSymptomTicker: (patientId: number, deltaWindowDays = 30, chartWindowDays = 550) =>
     request(
       `/clinicians/patient/${patientId}/symptom-ticker?delta_window_days=${deltaWindowDays}&chart_window_days=${chartWindowDays}`
     ),

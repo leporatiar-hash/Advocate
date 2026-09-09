@@ -31,6 +31,7 @@ _MIGRATIONS = [
     "ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS clinicians JSONB",
     "ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS log_type VARCHAR DEFAULT 'detailed'",
     "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'clinician'",
+    "ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS last_appointment_date DATE",
 ]
 
 _SEED_DEFAULT_CONTACTS = """

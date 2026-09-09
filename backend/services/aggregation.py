@@ -1,3 +1,4 @@
+import zlib
 from collections import defaultdict
 from datetime import date as date_type, datetime, timedelta
 from typing import Optional
@@ -32,6 +33,27 @@ SAFETY_SYMPTOM_KEYWORDS = (
 )
 
 
+def note_badges(period: dict) -> list:
+    """Closed, small category list for "what's notable" about one logged day —
+    episode / severe symptom / missed dose — reused both by the portal's
+    recent_notes feed and the Quick View headline's notable-events slot, so
+    the two describe "notable" the same way. `period` is any dict shaped like
+    a DailyLog (episode/symptoms/medications_taken), not necessarily the ORM
+    object itself.
+    """
+    badges = []
+    episode = period.get("episode") or {}
+    if episode.get("occurred"):
+        badges.append("Episode")
+    for s in (period.get("symptoms") or []):
+        if (s.get("severity") or 0) >= 8:
+            badges.append(f"{s['name']} severe")
+    meds = period.get("medications_taken") or []
+    if any(not m.get("taken") for m in meds):
+        badges.append("Missed dose")
+    return badges[:3]
+
+
 def _is_safety_symptom(name: str) -> bool:
     lowered = name.lower()
     return any(kw in lowered for kw in SAFETY_SYMPTOM_KEYWORDS)
@@ -60,6 +82,59 @@ AMBER_TIER_KEYWORDS = (
     "anxious",
     "panic",
 )
+
+
+# Number of stable palette slots the frontend's SERIES_COLORS/DASH_PATTERNS
+# arrays provide (app/lib/chartTheme.ts) — kept here, not imported, since the
+# two sides of the API boundary can't share a literal; if that array's length
+# ever changes, update this too.
+SYMPTOM_COLOR_SLOTS = 5
+
+
+def symptom_color_index(name: str) -> int:
+    """Stable palette slot for a symptom, keyed by name alone — never by chart
+    rank or array position. A symptom's color must not change when the
+    clinician toggles the date range: rank position does change (a symptom's
+    event/delta is recomputed per window), so deriving color from rank makes
+    identity flicker exactly when the clinician is watching the chart most
+    closely. CRC32 gives a deterministic, stateless slot with no new table to
+    remember "this patient's Anxiety is slot 0" — collisions across more than
+    SYMPTOM_COLOR_SLOTS distinct symptoms are accepted the same way a sixth
+    charted series already accepts reusing a hue (see chartTheme.ts).
+    """
+    return zlib.crc32(name.strip().lower().encode()) % SYMPTOM_COLOR_SLOTS
+
+
+def assign_color_indices(names) -> dict:
+    """Stable color slot per name, collision-resolved across this call: a bare
+    hash into only SYMPTOM_COLOR_SLOTS buckets collides often enough at small
+    n (5 names into 5 slots collides more often than not) that two symptoms
+    charted together could render with the same color AND the same dash —
+    indistinguishable, the opposite of what a stable identity color is for.
+    Resolution order is alphabetical, not call order or rank, so which name
+    "wins" a contested slot doesn't depend on which window is selected —
+    only on the set of names present, which callers should keep consistent
+    (see build_symptom_deltas's chart_window_days, which is fixed regardless
+    of the delta window the clinician has selected). Beyond
+    SYMPTOM_COLOR_SLOTS distinct names, the excess do reuse a slot — the same
+    accepted tradeoff as a 6th charted series reusing a hue.
+    """
+    assigned: dict = {}
+    used: set = set()
+    for name in sorted(names):
+        slot = symptom_color_index(name)
+        if slot in used and len(used) < SYMPTOM_COLOR_SLOTS:
+            slot = next(s for s in range(SYMPTOM_COLOR_SLOTS) if s not in used)
+        assigned[name] = slot
+        used.add(slot)
+    return assigned
+
+
+# A routine-tier symptom (unmatched by the keyword lists below) whose recent
+# severity reaches this level is escalated to rank and badge as amber — a
+# keyword miss must not let a 9/10 symptom sort under a 1/10 amber-tier one.
+# Same threshold build_tier_warnings already uses to flag the keyword gap.
+TIER_ESCALATION_SEVERITY = 8
 
 
 def symptom_tier(name: str) -> str:
@@ -636,6 +711,7 @@ def build_symptom_series(logs, start_date: date_type, end_date: date_type, limit
         reverse=True,
     )
     charted = ranked[:limit]
+    color_by_name = assign_color_indices(by_symptom.keys())
 
     dates = []
     d = start_date
@@ -646,7 +722,7 @@ def build_symptom_series(logs, start_date: date_type, end_date: date_type, limit
     return {
         "dates": [d.isoformat() for d in dates],
         "series": [
-            {"symptom": name, "values": [values.get(d) for d in dates]}
+            {"symptom": name, "values": [values.get(d) for d in dates], "color_index": color_by_name[name]}
             for name, values in charted
         ],
         "omitted": max(0, len(ranked) - len(charted)),
@@ -781,7 +857,14 @@ def find_onset_date(dates: list, values: list, window_start_iso: str, baseline_v
     return onset
 
 
-def classify_symptom_event(dates: list, values: list, chart_start_iso: str, delta_start_iso: str, bin_days: int = 1) -> dict:
+def classify_symptom_event(
+    dates: list,
+    values: list,
+    chart_start_iso: str,
+    delta_start_iso: str,
+    bin_days: int = 1,
+    prior_days_logged: int = TREND_LOW_N_DAYS,
+) -> dict:
     """Classifies one symptom's trajectory into an event a clinician would
     actually ask about, not just a number:
 
@@ -791,6 +874,14 @@ def classify_symptom_event(dates: list, values: list, chart_start_iso: str, delt
       previously invisible: a symptom with too little data to trust a delta
       rendered as flat "not enough data" regardless of whether that data was
       "nothing before, something new" or "always this sparse."
+
+      Gated on `prior_days_logged` (any log at all in the prior span, not just
+      this symptom): a prior window with too few *logged days* to have said
+      anything is not evidence the symptom is new, only evidence nobody was
+      watching yet. Without this gate, a young account (or a wide range on a
+      young account) reads every symptom as "emerged," because an unobserved
+      prior period is indistinguishable from a genuinely quiet one — see the
+      caller, build_symptom_deltas, for where this is computed.
     - resolved: occurred in the lookback, absent for the whole delta window.
     - persisting: occurred throughout the delta window at a sustained
       elevated average (>= PERSISTING_SEVERITY_FLOOR) with no real delta —
@@ -818,8 +909,19 @@ def classify_symptom_event(dates: list, values: list, chart_start_iso: str, delt
 
     has_prior = len(prior) > 0
     has_recent = len(recent) > 0
+    prior_observed = prior_days_logged >= TREND_LOW_N_DAYS
 
     if has_recent and not has_prior:
+        if not prior_observed:
+            # Nobody was logging yet in the prior span — can't tell "new" from
+            # "unobserved." Falls through to the low_n "steady" branch below,
+            # same honest non-answer as too little recent data.
+            return {
+                "event": "steady",
+                "baseline_date": None, "baseline_value": None,
+                "current_date": None, "current_value": None,
+                "delta": None, "low_n": True,
+            }
         current_date, current_value = _edge_mean(recent, from_start=False, bin_days=bin_days)
         return {
             "event": "emerged",
@@ -907,17 +1009,60 @@ def build_symptom_deltas(logs, chart_start: date_type, chart_end: date_type, del
     delta_start_iso = (chart_end - timedelta(days=delta_window_days - 1)).isoformat()
     bin_days = bin_days_for_window(delta_window_days)
 
+    # Any log at all (any symptom) in the prior span — see classify_symptom_event's
+    # prior_observed gate. Computed once here, over every log, rather than per
+    # symptom: whether the prior window was observed at all doesn't depend on
+    # which symptom is asking.
+    prior_days_logged = len({
+        log.date for log in logs
+        if chart_start_iso <= log.date.isoformat() < delta_start_iso
+    })
+
+    color_by_name = assign_color_indices(by_symptom.keys())
+
     result = []
     for name, values in by_symptom.items():
         series_values = [values.get(d) for d in dates]
+        event = classify_symptom_event(
+            date_strs, series_values, chart_start_iso, delta_start_iso, bin_days,
+            prior_days_logged=prior_days_logged,
+        )
+
+        raw_tier = symptom_tier(name)
+        tier = raw_tier
+        if tier == "routine":
+            recent_scored = [
+                v for d, v in zip(date_strs, series_values)
+                if d >= delta_start_iso and v is not None
+            ]
+            if recent_scored and max(recent_scored) >= TIER_ESCALATION_SEVERITY:
+                tier = "amber"
+
         result.append({
             "symptom": name,
-            "tier": symptom_tier(name),
+            "tier": tier,
+            # Not part of SymptomDelta's schema — dropped on the way out by
+            # response_model filtering. Kept only so build_tier_warnings can
+            # still see the un-escalated keyword tier (see its docstring: it
+            # diagnoses the keyword matcher itself, which severity escalation
+            # would otherwise silence for exactly the cases it exists to catch).
+            "raw_tier": raw_tier,
+            "color_index": color_by_name[name],
             "dates": date_strs,
             "values": series_values,
-            **classify_symptom_event(date_strs, series_values, chart_start_iso, delta_start_iso, bin_days),
+            **event,
         })
     return result
+
+
+def count_logged_days(logs, start_iso: str, end_iso: str) -> int:
+    """Distinct calendar days with at least one log in [start_iso, end_iso] —
+    the "X of Y days logged" denominator for whatever window is actually being
+    displayed, not a stale fixed-window count. See get_symptom_ticker."""
+    return len({
+        log.date for log in logs
+        if start_iso <= log.date.isoformat() <= end_iso
+    })
 
 
 def build_tier_warnings(symptom_deltas: list, delta_start_iso: str, window_days: int) -> list:
@@ -932,10 +1077,10 @@ def build_tier_warnings(symptom_deltas: list, delta_start_iso: str, window_days:
     """
     warnings = []
     for s in symptom_deltas:
-        if s["tier"] != "routine":
+        if s.get("raw_tier", s["tier"]) != "routine":
             continue
         recent_values = [v for d, v in zip(s["dates"], s["values"]) if d >= delta_start_iso and v is not None]
-        if recent_values and max(recent_values) >= 8:
+        if recent_values and max(recent_values) >= TIER_ESCALATION_SEVERITY:
             warnings.append(
                 f"“{s['symptom']}” scored {max(recent_values):.1f}/10 in the last {window_days} days but "
                 "didn't match a known severity tier, so it's being treated as routine."

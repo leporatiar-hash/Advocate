@@ -24,6 +24,8 @@ from services.aggregation import (
     combine_bin_severity,
     compute_adherence_ordering,
     compute_delta,
+    count_logged_days,
+    note_badges,
     group_observation_periods,
     raw_trend,
     symptom_trend,
@@ -68,20 +70,6 @@ def _age_from_dob(dob: Optional[date_type]) -> Optional[int]:
     if (today.month, today.day) < (dob.month, dob.day):
         years -= 1
     return years
-
-
-def _note_badges(period: dict) -> List[str]:
-    badges = []
-    episode = period.get("episode") or {}
-    if episode.get("occurred"):
-        badges.append("Episode")
-    for s in (period.get("symptoms") or []):
-        if (s.get("severity") or 0) >= 8:
-            badges.append(f"{s['name']} severe")
-    meds = period.get("medications_taken") or []
-    if any(not m.get("taken") for m in meds):
-        badges.append("Missed dose")
-    return badges[:3]
 
 
 @router.get("/patients", response_model=List[schemas.ClinicianPatientSummary])
@@ -303,7 +291,7 @@ def get_clinician_portal(
         {
             "date": p["date"],
             "text": p["notes"],
-            "badges": _note_badges(p),
+            "badges": note_badges(p),
             "reaffirmed_dates": p["repeated_dates"],
         }
         for p in recent_periods + cited_periods
@@ -408,6 +396,15 @@ def get_symptom_ticker(
     }
     bin_days = bin_days_for_window(delta_window_days)
 
+    days_logged = count_logged_days(logs, window_start_iso, today.isoformat())
+
+    treatment_plan = (
+        db.query(models.TreatmentPlan)
+        .filter(models.TreatmentPlan.patient_id == patient_id)
+        .first()
+    )
+    last_appointment_date = treatment_plan.last_appointment_date if treatment_plan else None
+
     # A gap in our own keyword matcher, not information about this patient —
     # goes to server logs, never the clinician-facing response. See
     # symptom_tier's docstring for the risk this is catching.
@@ -418,19 +415,50 @@ def get_symptom_ticker(
     lead = ranked[0] if ranked else None
     ordering = compute_adherence_ordering(lead, adherence, window_start_iso)
 
+    # The headline's "what's notable from notes" slot — closed category list
+    # (episode / severe symptom / missed dose, see note_badges), never the raw
+    # note text itself. Scoped to the same delta window everything else here
+    # describes.
+    notable_events = [
+        {"date": log.date.isoformat(), "badges": badges}
+        for log in logs
+        if log.date.isoformat() >= window_start_iso
+        for badges in [note_badges({
+            "episode": log.episode, "symptoms": log.symptoms, "medications_taken": log.medications_taken,
+        })]
+        if badges
+    ]
+
+    # Verbatim, for the Quick View notes panel and its drill-down — window-scoped
+    # (unlike portal's recent_notes, a fixed global cap; see SymptomTickerResponse).
+    window_notes = [
+        {
+            "date": log.date,
+            "text": log.notes,
+            "badges": note_badges({
+                "episode": log.episode, "symptoms": log.symptoms, "medications_taken": log.medications_taken,
+            }),
+            "reaffirmed_dates": [],
+        }
+        for log in logs
+        if log.date.isoformat() >= window_start_iso and log.notes
+    ]
+
     # Live call, tightly bounded: the model sees only the facts already
-    # computed above (symptom/tier/event/from/to, adherence ordering), never a
-    # raw log or note — see services/ticker_headline.py's module docstring for
-    # why this is live rather than batched like the AI Summary module. Any
-    # failure — timeout, missing key, malformed response — falls back to a
-    # deterministic sentence ranked by the same tier/event priority, never a
-    # blank headline.
+    # computed above (symptom/tier/event/from/to, adherence ordering, notable
+    # event categories, steady symptoms), never raw notes or logs — see
+    # services/ticker_headline.py's module docstring for why this is live
+    # rather than batched like the AI Summary module. Any failure — timeout,
+    # missing key, malformed response — falls back to a deterministic
+    # sentence ranked by the same tier/event priority, never a blank headline.
     api_key = os.getenv("OPENAI_API_KEY")
     headline_source = "fallback"
-    headline = fallback_headline(symptoms, adherence, delta_window_days, bin_days, ordering)
+    headline = fallback_headline(symptoms, adherence, delta_window_days, bin_days, ordering, notable_events)
     if api_key:
         try:
-            headline = generate_headline(symptoms, adherence, delta_window_days, bin_days, api_key, ordering)
+            headline = generate_headline(
+                symptoms, adherence, delta_window_days, bin_days, api_key, ordering, notable_events,
+            )
             headline_source = "llm"
         except Exception as exc:  # noqa: BLE001 — any failure degrades to the deterministic sentence
             logger.warning("[symptom-ticker headline] LLM call failed, using fallback: %s: %s", type(exc).__name__, exc)
@@ -440,8 +468,12 @@ def get_symptom_ticker(
         "chart_window_days": chart_window_days,
         "symptoms": symptoms,
         "adherence": adherence,
+        "days_logged": days_logged,
+        "days_in_window": delta_window_days,
+        "window_notes": window_notes,
         "headline": headline,
         "headline_source": headline_source,
+        "last_appointment_date": last_appointment_date,
     }
 
 

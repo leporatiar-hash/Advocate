@@ -82,9 +82,9 @@ export function SymptomTrendChart({
 
   const stats = useMemo(
     () =>
-      block.series.map((s, i) => ({
+      block.series.map((s) => ({
         symptom: s.symptom,
-        color: seriesColor(i),
+        color: seriesColor(s.color_index),
         avg: mean(s.values),
         latest: [...s.values].reverse().find((v) => v != null) ?? null,
         daysScored: s.values.filter((v) => v != null).length,
@@ -114,7 +114,7 @@ export function SymptomTrendChart({
         <>
           <TrendChart
             dates={block.dates}
-            series={block.series.map((s) => ({ label: s.symptom, values: s.values }))}
+            series={block.series.map((s) => ({ label: s.symptom, values: s.values, color: seriesColor(s.color_index) }))}
             yMin={0}
             yMax={10}
             valueSuffix="/10"

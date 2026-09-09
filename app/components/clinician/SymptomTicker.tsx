@@ -68,6 +68,20 @@ function downsample(dates: string[], values: (number | null)[], binDays: number)
   return { dates: outDates, values: outValues };
 }
 
+/** Nearest chart-label index for a visit date that may not land exactly on a
+ * bin boundary once the range is binned weekly/biweekly/monthly — null when
+ * the visit predates or postdates every label, so the marker is omitted
+ * rather than pinned to an edge it doesn't actually belong to. */
+function visitDateIndex(dates: string[], visitDate?: string | null): number | null {
+  if (!visitDate || dates.length === 0) return null;
+  if (visitDate < dates[0] || visitDate > dates[dates.length - 1]) return null;
+  let closest = 0;
+  for (let i = 0; i < dates.length; i++) {
+    if (dates[i] <= visitDate) closest = i;
+  }
+  return closest;
+}
+
 function fmtDate(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00`);
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -113,6 +127,12 @@ function elevatedDates(row: TickerRow, deltaStartIso: string): string[] {
   return row.dates.filter((d, i) => d >= deltaStartIso && (row.values[i] ?? -1) >= ELEVATED_SEVERITY);
 }
 
+// The badge conveys meaning, not the color's own name — printing "red"/"amber"
+// as the label would make the word and the hue the same signal, which breaks
+// down the moment either one is misread (colorblind vision, black-and-white
+// print). "red"/"amber" here are tier keys from the backend, not display text.
+const TIER_LABEL: Record<string, string> = { red: "urgent", amber: "monitor" };
+
 function TierBadge({ tier }: { tier: string }) {
   if (tier === "routine") return null;
   const color = tier === "red" ? RISING : "var(--cp-amber)";
@@ -121,7 +141,7 @@ function TierBadge({ tier }: { tier: string }) {
       className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full flex-shrink-0"
       style={{ background: `${color}1A`, color }}
     >
-      {tier}
+      {TIER_LABEL[tier] ?? tier}
     </span>
   );
 }
@@ -152,18 +172,27 @@ interface TickerSeries {
  * `output: "export"` prerenders this page at build time with no real canvas
  * available.
  *
- * No reference-line marker: the delta window and the displayed range are now
- * always the same window (both driven by the same range button), so there is
- * no longer a "before" and "after" split within one chart to mark — see
- * SymptomTicker's range-refetch effect below.
+ * `visitDate` draws one reference marker — the patient's last recorded
+ * appointment — as a dashed vertical line via a small inline Chart.js plugin
+ * (afterDraw + getPixelForValue), rather than pulling in
+ * chartjs-plugin-annotation for one line. Silently omitted when the date
+ * doesn't fall inside the currently displayed range.
  */
-function TickerChart({ dates, series }: { dates: string[]; series: TickerSeries[] }) {
+function TickerChart({
+  dates,
+  series,
+  visitDate,
+}: {
+  dates: string[];
+  series: TickerSeries[];
+  visitDate?: string | null;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chartRef = useRef<any>(null);
   const [failed, setFailed] = useState(false);
 
-  const dataKey = useMemo(() => JSON.stringify({ dates, series }), [dates, series]);
+  const dataKey = useMemo(() => JSON.stringify({ dates, series, visitDate }), [dates, series, visitDate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -250,6 +279,32 @@ function TickerChart({ dates, series }: { dates: string[]; series: TickerSeries[
           },
         };
 
+        const visitIndex = visitDateIndex(dates, visitDate);
+        if (visitIndex !== null) {
+          config.plugins = [{
+            id: "visitMarker",
+            afterDraw(chart: any) {
+              const { ctx, chartArea, scales } = chart;
+              const x = scales.x.getPixelForValue(visitIndex);
+              if (x < chartArea.left || x > chartArea.right) return;
+              ctx.save();
+              ctx.strokeStyle = CHART_INK.axis;
+              ctx.setLineDash([3, 3]);
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(x, chartArea.top);
+              ctx.lineTo(x, chartArea.bottom);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.fillStyle = CHART_INK.textMuted;
+              ctx.font = "10px sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText("Last visit", x, chartArea.top + 10);
+              ctx.restore();
+            },
+          }];
+        }
+
         chartRef.current = new Chart(canvas, config);
       } catch {
         if (!cancelled) setFailed(true);
@@ -328,15 +383,9 @@ function DrillDown({
 export function SymptomTicker({
   patientId,
   patientName,
-  daysLogged,
-  daysInWindow,
-  recentNotes,
 }: {
   patientId: number;
   patientName: string;
-  daysLogged: number;
-  daysInWindow: number;
-  recentNotes: RecentNote[];
 }) {
   const [data, setData] = useState<SymptomTickerResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -348,6 +397,13 @@ export function SymptomTicker({
   const [error, setError] = useState(false);
   const [range, setRange] = useState<string>("1M");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [notesShown, setNotesShown] = useState(5);
+  // Per-symptom visibility override, keyed by symptom name so it survives a
+  // range change (the rank-based default below does not: a symptom's rank can
+  // move when the window changes, but a clinician's explicit on/off choice
+  // shouldn't flip with it). Undefined = no explicit choice yet, use the
+  // rank-based default (top 3 visible).
+  const [visibilityOverride, setVisibilityOverride] = useState<Record<string, boolean>>({});
 
   const activeRange = RANGES.find((r) => r.key === range) ?? RANGES[1];
 
@@ -355,8 +411,9 @@ export function SymptomTicker({
     let cancelled = false;
     setRefreshing(true);
     setError(false);
+    setNotesShown(5);
     api
-      .getSymptomTicker(patientId, activeRange.days, 365)
+      .getSymptomTicker(patientId, activeRange.days)
       .then((res) => {
         if (!cancelled) setData(res as SymptomTickerResponse);
       })
@@ -374,8 +431,6 @@ export function SymptomTicker({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, activeRange.days]);
-
-  const notesByDate = useMemo(() => new Map(recentNotes.map((n) => [n.date, n])), [recentNotes]);
 
   // Matches whatever range is currently selected, not a fixed 30 — the
   // drill-down's "elevated days" must scope to the same window the headline
@@ -407,14 +462,29 @@ export function SymptomTicker({
   // an occasional side-effect note used to scatter across the chart. Every
   // other event, including a single-day "emerged", is real signal worth a line.
   const chartable = rows.filter((r) => r.event !== "steady");
-  const charted = [...chartable].sort(compareRank).slice(0, MAX_CHARTED);
-  const chartedIndexBySymptom = new Map(charted.map((c, i) => [c.symptom, i]));
+  const rankedChartable = [...chartable].sort(compareRank);
+  // Default-on: the top 3 by priority rank — five overlapping lines is a
+  // chart wall a clinician has to squint through. An explicit toggle click
+  // always wins over this default, in either direction.
+  const isVisible = (symptom: string, rankIndex: number) =>
+    visibilityOverride[symptom] ?? rankIndex < 3;
+  const charted = rankedChartable
+    .filter((c, i) => isVisible(c.symptom, i))
+    .slice(0, MAX_CHARTED);
+  const chartedSymptoms = new Set(charted.map((c) => c.symptom));
   const tickerList = [...rows].sort(compareRank);
 
   const binned = charted.map((c) =>
     downsample(sliceRange(c.dates, activeRange.days), sliceRange(c.values, activeRange.days), activeRange.binDays)
   );
   const chartDates = binned[0]?.dates ?? [];
+
+  // Already window-scoped by the backend (unlike the portal's recent_notes,
+  // a fixed global cap of the 5 most-recent notable periods in the patient's
+  // whole history — see SymptomTickerResponse.window_notes), just sorted
+  // newest-first here. Never paraphrased or re-scored, only sorted.
+  const windowNotes = [...data.window_notes].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const notesByDate = new Map(data.window_notes.map((n) => [n.date, n]));
 
   return (
     <div className="space-y-5" style={{ opacity: refreshing ? 0.6 : 1, transition: "opacity 0.15s" }}>
@@ -433,8 +503,12 @@ export function SymptomTicker({
         {data.headline}
       </div>
 
-      {/* Range selector + chart — hidden entirely when nothing changed */}
-      {charted.length > 0 && (
+      {/* Range selector + chart — hidden entirely when nothing changed.
+          Gated on rankedChartable (any real signal at all), not on the
+          currently toggled-on `charted`: hiding it whenever a clinician
+          toggles every visible symptom off would hide the range selector
+          they'd need to get back here. */}
+      {rankedChartable.length > 0 && (
         <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
           <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
             <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "var(--cp-border)" }}>
@@ -454,7 +528,7 @@ export function SymptomTicker({
               ))}
             </div>
             <p className="text-xs cp-tabular" style={{ color: "var(--cp-text-muted)" }}>
-              {patientName} · {daysLogged} of {daysInWindow} days logged
+              {patientName} · {data.days_logged} of {data.days_in_window} days logged
             </p>
           </div>
           <p className="text-xs mb-2" style={{ color: "var(--cp-text-muted)" }}>
@@ -466,13 +540,18 @@ export function SymptomTicker({
             series={charted.map((c, i) => ({
               label: c.symptom,
               values: binned[i]?.values ?? [],
-              color: seriesColor(i),
-              dash: DASH_PATTERNS[i] ?? [],
+              // Keyed by symptom identity (color_index, assigned server-side —
+              // see symptom_color_index in aggregation.py), never by i: i is
+              // this symptom's rank position, which is recomputed per window,
+              // and a symptom's color must not flicker when the range toggles.
+              color: seriesColor(c.color_index),
+              dash: DASH_PATTERNS[c.color_index % DASH_PATTERNS.length] ?? [],
               // The single leading (rank-0) symptom draws heavier — same
               // priority the headline and ticker list already use, made
               // visible in the chart too, not just the sort order.
               weight: i === 0 ? 3 : 1.5,
             }))}
+            visitDate={data.last_appointment_date}
           />
         </div>
       )}
@@ -486,36 +565,48 @@ export function SymptomTicker({
           Sorted by clinical priority, {activeRange.days === 7 ? "the last week" : `last ${activeRange.days} days`}
         </p>
         {tickerList.map((row) => {
-          const chartedIndex = chartedIndexBySymptom.get(row.symptom);
-          const isCharted = chartedIndex !== undefined;
+          const isChartable = chartable.some((c) => c.symptom === row.symptom);
+          const isCharted = chartedSymptoms.has(row.symptom);
           const isExpanded = expanded === row.symptom;
           const { text: eventText, color: eventColor } = eventLabel(row);
 
           return (
-            <div key={row.symptom}>
-              <button
-                onClick={() => setExpanded(isExpanded ? null : row.symptom)}
-                aria-expanded={isExpanded}
-                className="w-full flex items-center gap-3 p-3 text-left"
-              >
-                <DashSwatch
-                  color={isCharted ? seriesColor(chartedIndex) : "var(--cp-text-muted)"}
-                  dash={isCharted ? DASH_PATTERNS[chartedIndex] ?? [] : [1, 3]}
-                />
-                <TierBadge tier={row.tier} />
-                <span className="flex-1 text-sm font-semibold truncate" style={{ color: "var(--cp-text)" }}>
-                  {row.symptom}
-                </span>
-                <span className="text-sm cp-tabular" style={{ color: "var(--cp-text)" }}>
-                  {row.current_value != null ? row.current_value.toFixed(1) : "—"}
-                </span>
-                <span
-                  className="text-sm font-semibold cp-tabular flex-shrink-0 text-right"
-                  style={{ color: eventColor, minWidth: 120 }}
+            <div key={row.symptom} style={{ opacity: isChartable && !isCharted ? 0.5 : 1 }}>
+              <div className="w-full flex items-center gap-3 p-3 text-left">
+                {isChartable ? (
+                  <button
+                    onClick={() =>
+                      setVisibilityOverride((prev) => ({ ...prev, [row.symptom]: !isCharted }))
+                    }
+                    aria-pressed={isCharted}
+                    aria-label={`${isCharted ? "Hide" : "Show"} ${row.symptom} on the chart`}
+                    className="flex-shrink-0"
+                  >
+                    <DashSwatch color={seriesColor(row.color_index)} dash={DASH_PATTERNS[row.color_index % DASH_PATTERNS.length] ?? []} />
+                  </button>
+                ) : (
+                  <DashSwatch color="var(--cp-text-muted)" dash={[1, 3]} />
+                )}
+                <button
+                  onClick={() => setExpanded(isExpanded ? null : row.symptom)}
+                  aria-expanded={isExpanded}
+                  className="flex-1 flex items-center gap-3 text-left min-w-0"
                 >
-                  {eventText}
-                </span>
-              </button>
+                  <TierBadge tier={row.tier} />
+                  <span className="flex-1 text-sm font-semibold truncate" style={{ color: "var(--cp-text)" }}>
+                    {row.symptom}
+                  </span>
+                  <span className="text-sm cp-tabular" style={{ color: "var(--cp-text)" }}>
+                    {row.current_value != null ? row.current_value.toFixed(1) : "—"}
+                  </span>
+                  <span
+                    className="text-sm font-semibold cp-tabular flex-shrink-0 text-right"
+                    style={{ color: eventColor, minWidth: 120 }}
+                  >
+                    {eventText}
+                  </span>
+                </button>
+              </div>
               {isExpanded && (
                 <div className="px-3 pb-3">
                   <DrillDown row={row} notesByDate={notesByDate} deltaStartIso={deltaStartIso} />
@@ -525,6 +616,50 @@ export function SymptomTicker({
           );
         })}
       </div>
+
+      {/* Caregiver notes, verbatim — the differentiator this page otherwise
+          buries under numbers: a human watched this person every day and
+          wrote it down. Never paraphrased, never scored here. */}
+      {windowNotes.length > 0 && (
+        <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
+          <p
+            className="text-[11px] font-bold uppercase tracking-wide pb-2"
+            style={{ color: "var(--cp-text-muted)" }}
+          >
+            Caregiver notes, {activeRange.days === 7 ? "the last week" : `last ${activeRange.days} days`}
+          </p>
+          <div className="space-y-3 divide-y" style={{ borderColor: "var(--cp-border)" }}>
+            {windowNotes.slice(0, notesShown).map((n) => (
+              <div key={n.date} className="pt-3 first:pt-0" style={{ borderLeft: "2px solid var(--cp-amber)", paddingLeft: 12 }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs" style={{ color: "var(--cp-text-muted)" }}>{fmtDate(n.date)}</p>
+                  {n.badges.map((b) => (
+                    <span
+                      key={b}
+                      className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full"
+                      style={{ background: "rgba(11,11,11,0.06)", color: "var(--cp-text-muted)" }}
+                    >
+                      {b}
+                    </span>
+                  ))}
+                </div>
+                <p className={lora.className} style={{ fontSize: 15, lineHeight: 1.5, color: "var(--cp-text)", marginTop: 2 }}>
+                  {n.text}
+                </p>
+              </div>
+            ))}
+          </div>
+          {windowNotes.length > notesShown && (
+            <button
+              onClick={() => setNotesShown((n) => n + 5)}
+              className="text-xs font-semibold mt-3"
+              style={{ color: "var(--cp-teal)" }}
+            >
+              Show {Math.min(5, windowNotes.length - notesShown)} more
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

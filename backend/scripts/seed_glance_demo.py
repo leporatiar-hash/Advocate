@@ -20,6 +20,7 @@ Safe to re-run — idempotent on the demo patient's daily logs (deletes and
 re-inserts only that patient's logs, never touches anything else).
 """
 import os
+import random
 import sys
 from datetime import date, timedelta
 from urllib.parse import urlparse
@@ -207,6 +208,139 @@ def _seed_daily_logs(db, patient_id, caregiver_id, med_id) -> None:
         ))
 
 
+# ── Older history: months 1-13 behind the hand-tuned recent 2 months above ──
+#
+# The recent 62 days (CURRENT_OFFSETS/PRIOR_OFFSETS) are hand-typed because
+# _print_summary's assertions depend on their exact numbers. Everything from
+# here back is generated from per-phase formulas instead — a real clinical
+# arc for the 3M/6M/1Y ranges and the symptom-visibility toggle to have
+# something to show, rather than lines that start mid-canvas. Nothing here
+# overlaps the tuned window, so it can't perturb those assertions.
+OLDER_HISTORY_START_OFFSET = 62
+OLDER_HISTORY_END_OFFSET = 449  # ~15 months total combined with the tuned recent 62 days
+
+# Phase boundaries, in days-before-today (larger offset = further in the past).
+RECOVERY_END = 269       # most recent day of "months 6-13": gradual recovery
+MED_CHANGE_END = 299     # most recent day of "month 5": med change, symptoms turn the corner
+DETERIORATION_END = 329  # most recent day of "month 4": acute deterioration
+# beyond DETERIORATION_END, out to OLDER_HISTORY_END_OFFSET, is "months 1-3": baseline
+
+RELAPSE_OFFSETS = range(150, 157)    # one small relapse blip mid-recovery — not a fairy tale
+VACATION_OFFSETS = range(100, 107)   # a week with nothing logged at all
+MED_CHANGE_NOTE_OFFSET = MED_CHANGE_END
+
+
+def _phase_severities(offset: int) -> dict:
+    """Symptom severities for one older-history day, as a pure function of
+    which of the four narrative phases `offset` falls in."""
+    if offset > DETERIORATION_END:
+        # Months 1-3: baseline — moderate, unremarkable.
+        sev = {}
+        if offset % 4 == 0:
+            sev["Anxiety"] = 2 + (offset % 3)
+        if offset % 10 == 0:
+            sev["Nausea"] = 2 + (offset % 2)
+        if offset % 13 == 0:
+            sev["Mood changes"] = 2 + (offset % 2)
+        return sev
+
+    if offset > MED_CHANGE_END:
+        # Month 4: deterioration. days_in counts forward from the phase start.
+        days_in = DETERIORATION_END - offset
+        sev = {"Anxiety": min(6, 4 + days_in // 10)}
+        if days_in >= 5:
+            sev["Sleep issues"] = min(9, 4 + days_in // 4)
+        if days_in >= 10:
+            sev["Agitation"] = min(9, 5 + days_in // 5)
+        return sev
+
+    if offset > RECOVERY_END:
+        # Month 5: med change lands; symptoms start coming down from their peak.
+        days_in = MED_CHANGE_END - offset
+        return {
+            "Anxiety": max(4, 6 - days_in // 6),
+            "Sleep issues": max(5, 8 - days_in // 5),
+            "Agitation": max(4, 8 - days_in // 5),
+        }
+
+    # Months 6-13: gradual recovery toward baseline, with one relapse blip.
+    days_in = RECOVERY_END - offset  # 0 at the start of recovery, grows toward today
+    relapse = offset in RELAPSE_OFFSETS
+    anxiety = 4 - days_in // 40
+    agitation = 4 - days_in // 35
+    if relapse:
+        anxiety = max(anxiety, 6)
+        agitation = max(agitation, 7)
+    sev = {}
+    if anxiety > 1 and (offset % 3 == 0 or relapse):
+        sev["Anxiety"] = max(1, anxiety)
+    if agitation > 1 and (offset % 5 == 0 or relapse):
+        sev["Agitation"] = max(1, agitation)
+    if offset % 11 == 0:
+        sev["Nausea"] = 2
+    return sev
+
+
+def _seed_older_history(db, patient_id, caregiver_id, med_id) -> None:
+    """~13 months of history behind the hand-tuned recent 2 months — see the
+    module comment above _phase_severities for why this is generated rather
+    than hand-typed."""
+    for offset in range(OLDER_HISTORY_START_OFFSET, OLDER_HISTORY_END_OFFSET + 1):
+        if offset in VACATION_OFFSETS:
+            continue
+        # Scattered single-day gaps outside the acute phase — perfect logging
+        # reads as fake to anyone who has worked with real caregivers.
+        if offset > MED_CHANGE_END and offset % 9 == 0:
+            continue
+
+        log_date = TODAY - timedelta(days=offset)
+        symptoms = [{"name": name, "severity": sev} for name, sev in _phase_severities(offset).items()]
+
+        in_deterioration = MED_CHANGE_END < offset <= DETERIORATION_END
+        days_in_deterioration = DETERIORATION_END - offset
+        missed = (offset % 4 == 0) if in_deterioration else (offset % 14 == 0)
+        occurred = in_deterioration and days_in_deterioration == 25
+
+        notes = None
+        if offset == MED_CHANGE_NOTE_OFFSET:
+            notes = (
+                "Saw Dr. Alvarez today. She increased the Clozapine to 350mg "
+                "after last month's episode and wants to see how he does "
+                "before the next visit."
+            )
+        elif in_deterioration and days_in_deterioration == 15:
+            notes = "Barely slept again. Pacing most of the evening and snapping at everyone."
+        elif in_deterioration and days_in_deterioration == 27:
+            notes = "Rough week. He said he doesn't feel like himself and it's scary to watch."
+
+        db.add(models.DailyLog(
+            patient_id=patient_id,
+            logged_by=caregiver_id,
+            date=log_date,
+            medications_taken=[{
+                "medication_id": med_id,
+                "taken": not missed,
+                "time_taken": None if missed else "20:00",
+            }],
+            symptoms=symptoms or None,
+            episode={"occurred": occurred, "time": "19:00" if occurred else None,
+                     "description": "Flagged episode" if occurred else None},
+            lifestyle={
+                "smoked": offset % 3 != 0,
+                "alcohol": False,
+                "stressed": in_deterioration,
+                "ate_well": not in_deterioration,
+            },
+            notes=notes,
+            log_type="detailed",
+        ))
+
+
+# Exactly one month ago — the visit anchor for the Quick View headline's
+# "since your last visit" framing and the chart's visit marker.
+LAST_APPOINTMENT_OFFSET_DAYS = 30
+
+
 def _print_summary(db, patient_id) -> None:
     from services.aggregation import build_patient_aggregate, build_top_flag
 
@@ -304,6 +438,17 @@ def main() -> None:
             print(f"Reusing existing medication id={med.id}.")
 
         _seed_daily_logs(db, patient.id, caregiver.id, med.id)
+        _seed_older_history(db, patient.id, caregiver.id, med.id)
+
+        plan = (
+            db.query(models.TreatmentPlan)
+            .filter(models.TreatmentPlan.patient_id == patient.id)
+            .first()
+        )
+        if not plan:
+            plan = models.TreatmentPlan(patient_id=patient.id)
+            db.add(plan)
+        plan.last_appointment_date = TODAY - timedelta(days=LAST_APPOINTMENT_OFFSET_DAYS)
 
         db.commit()
         print("\nDone. Both demo logins (password is the same for each):")

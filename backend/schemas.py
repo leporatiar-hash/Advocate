@@ -268,6 +268,8 @@ class TreatmentPlanCreate(BaseModel):
     next_appointment_date: Optional[date] = None
     next_appointment_with: Optional[str] = None
 
+    last_appointment_date: Optional[date] = None
+
 
 class TreatmentPlanResponse(TreatmentPlanCreate):
     id: int
@@ -546,6 +548,10 @@ class SymptomSeries(BaseModel):
     # One entry per date in the parent's `dates`, null where that symptom was
     # not scored that day. Never zero-filled — a gap is not a good day.
     values: List[Optional[float]]
+    # Stable palette slot keyed by symptom name — see symptom_color_index in
+    # services/aggregation.py. Shared with SymptomDelta so a symptom's color
+    # is the same on this chart and on the Quick View ticker.
+    color_index: int = 0
 
 
 class SymptomSeriesBlock(BaseModel):
@@ -564,13 +570,19 @@ class AdherenceSeriesBlock(BaseModel):
 class SymptomDelta(BaseModel):
     symptom: str
     # Best-effort keyword-matched acuity tier — see symptom_tier in
-    # services/aggregation.py. "routine" includes both genuinely-routine
-    # symptoms and unrecognized names — an unmatched high-severity symptom is
-    # logged server-side (build_tier_warnings), never surfaced here: it's a
-    # gap in our matcher, not information about the patient.
+    # services/aggregation.py — escalated to "amber" when a "routine" name
+    # scores >= TIER_ESCALATION_SEVERITY in the window, so ranking and the
+    # badge reflect current severity, not just name-matching. An unmatched
+    # high-severity symptom below that floor is logged server-side
+    # (build_tier_warnings), never surfaced here: it's a gap in our matcher,
+    # not information about the patient.
     tier: str = "routine"
     # emerged | resolved | persisting | worsening | improving | steady
     event: str = "steady"
+    # Stable palette slot keyed by symptom name (see symptom_color_index in
+    # services/aggregation.py) — identical across every range/window so a
+    # symptom's color never changes when the clinician toggles the date range.
+    color_index: int = 0
     dates: List[str]
     values: List[Optional[float]]
     baseline_date: Optional[str] = None
@@ -601,12 +613,27 @@ class SymptomTickerResponse(BaseModel):
     chart_window_days: int
     symptoms: List[SymptomDelta]
     adherence: AdherenceDelta
+    # Days with at least one log, of the delta window's own length — recomputed
+    # per range so this never reports a stale fixed-window count (see
+    # count_logged_days in services/aggregation.py).
+    days_logged: int = 0
+    days_in_window: int = 0
+    # Verbatim caregiver notes scoped to THIS delta window — unlike the
+    # portal's recent_notes (a fixed global cap of the 5 most recent notable
+    # periods in the patient's whole history, not window-bound by design), a
+    # wide range here (6M/1Y) can genuinely have more than 5 notes, so this
+    # is queried fresh per request rather than reusing that global cap.
+    window_notes: List[RecentNote] = []
     # One or two clinical-register sentences — see services/ticker_headline.py.
     headline: str
     # "llm" or "fallback" — which path produced `headline`. Not shown to the
     # clinician; useful for spot-checking whether the LLM call is actually
     # succeeding in a given environment.
     headline_source: str = "fallback"
+    # Exact date of the patient's last recorded appointment, if known — the
+    # anchor for "since your last visit" framing and the chart's visit marker.
+    # See TreatmentPlan.last_appointment_date; null when never recorded.
+    last_appointment_date: Optional[date] = None
 
 
 class ClinicianPortalResponse(BaseModel):

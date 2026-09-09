@@ -256,13 +256,14 @@ function DashboardContent() {
         </div>
 
         {prefs.viewMode === "quick" ? (
-          <SymptomTicker
-            patientId={patientId}
-            patientName={patient.name}
-            daysLogged={stats.log_frequency.days_logged}
-            daysInWindow={stats.log_frequency.days_in_window}
-            recentNotes={recent_notes}
-          />
+          <>
+            {/* Same portal payload the Detailed view already fetches — Caregiver
+                Alert (via GlanceLayer) and What Went Well are agreed-on, not
+                optional, regardless of which layout is on screen. */}
+            <GlanceLayer portal={portal} />
+            <SymptomTicker patientId={patientId} patientName={patient.name} />
+            <WhatWentWell items={portal.clinical_summary?.what_went_well ?? []} />
+          </>
         ) : (
           <>
             {/* Glance layer — full-width banner, the 5-second read. Never optional. */}

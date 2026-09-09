@@ -64,6 +64,7 @@ export interface TreatmentPlan {
   care_goals: string | null;
   next_appointment_date: string | null;
   next_appointment_with: string | null;
+  last_appointment_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -429,6 +430,8 @@ export interface SymptomSeries {
   symptom: string;
   /** One entry per date in the parent block; null where not scored that day. */
   values: (number | null)[];
+  /** Stable palette slot keyed by symptom name — same slot on every chart. */
+  color_index: number;
 }
 
 export interface SymptomSeriesBlock {
@@ -450,6 +453,8 @@ export interface SymptomDelta {
   symptom: string;
   tier: SymptomTier;
   event: SymptomEvent;
+  /** Stable palette slot keyed by symptom name — never derived from rank order. */
+  color_index: number;
   dates: string[];
   values: (number | null)[];
   baseline_date: string | null;
@@ -476,8 +481,14 @@ export interface SymptomTickerResponse {
   chart_window_days: number;
   symptoms: SymptomDelta[];
   adherence: AdherenceDelta;
+  /** Days logged within the *currently selected* range, not a stale fixed window. */
+  days_logged: number;
+  days_in_window: number;
+  window_notes: RecentNote[];
   headline: string;
   headline_source: "llm" | "fallback";
+  /** Null when no appointment has ever been recorded for this patient. */
+  last_appointment_date: string | null;
 }
 
 export interface TopFlag {
