@@ -16,6 +16,7 @@ import pytest
 from services.timeline_ai import (
     BANNED_TERMS,
     find_banned_term,
+    find_fabricated_reference,
     fallback_headline,
     fallback_domain_summary,
     validate_ai_text,
@@ -79,6 +80,56 @@ class TestFallbackTemplatesAreCleanByConstruction:
     def test_fallback_domain_summary(self):
         facts = {"label": "Weight", "days_logged": 8, "days_in_range": 61, "note_count": 3}
         assert find_banned_term(fallback_domain_summary(facts)) is None
+
+
+class TestFindFabricatedReference:
+    """The word-list bans can never catch a wrong but well-phrased number —
+    this is the check that can, per the review: "A clinician acting on a
+    fabricated date is the worst failure this product can have.\""""
+
+    FACTS = {
+        "patient_first_name": "Marcus",
+        "range_start": "2026-01-01",
+        "range_end": "2026-01-31",
+        "days_logged": 28,
+        "lead_domain": {"label": "Sleep", "start": "low", "end": "medium"},
+        "episodes_in_window": [{"start": "2026-01-09", "end": "2026-01-12", "outcome": "held_at_home"}],
+    }
+
+    def test_accepts_dates_present_in_facts_long_form(self):
+        text = "The episode ran from January 9 to January 12, held at home."
+        assert find_fabricated_reference(text, self.FACTS) is None
+
+    def test_accepts_dates_present_in_facts_short_form(self):
+        text = "The episode ran from Jan 9 to Jan 12."
+        assert find_fabricated_reference(text, self.FACTS) is None
+
+    def test_accepts_numerals_present_in_facts(self):
+        text = "28 days were logged between January 1 and January 31."
+        assert find_fabricated_reference(text, self.FACTS) is None
+
+    def test_rejects_a_fabricated_date_one_day_off(self):
+        """The real episode is Jan 9-13, not Jan 8-13 — a plausible-looking
+        model error that a banned-word list would never catch."""
+        text = "The episode ran from January 8 to January 13."
+        assert find_fabricated_reference(text, self.FACTS) is not None
+
+    def test_rejects_a_fabricated_date_not_in_facts_at_all(self):
+        text = "Sleep quality was noted as low on February 2."
+        assert find_fabricated_reference(text, self.FACTS) is not None
+
+    def test_rejects_a_fabricated_numeral(self):
+        text = "Anxiety was rated 9 out of 10 on average."
+        assert find_fabricated_reference(text, self.FACTS) is not None
+
+    def test_fallback_templates_never_trigger_the_fabrication_check(self):
+        headline_facts = {
+            "range_start": "2025-12-02", "range_end": "2026-01-31",
+            "days_logged": 53, "days_in_range": 61,
+            "lead_domain": {"label": "Weight", "start": 198, "end": 217},
+        }
+        text = fallback_headline(headline_facts)
+        assert find_fabricated_reference(text, headline_facts) is None
 
 
 class TestEndToEndValidatorRejectsAnAdversarialModelOutput:

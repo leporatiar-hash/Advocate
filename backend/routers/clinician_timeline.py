@@ -30,22 +30,38 @@ from services.timeline_ai import get_latest_log_date
 router = APIRouter()
 
 
+_BAND_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
+
+
 def _band_caption(entries: list) -> str:
-    """Deterministic (no LLM) short caption: the current band and how many
-    trailing consecutive days it's held, e.g. "Low 13 days". Walks backward
-    from the end of the window; an unlogged day breaks the streak the same
-    way it breaks the chart's polyline — silence isn't evidence the band held."""
-    logged = [(d, b) for (d, _, b) in entries if b is not None]
+    """Deterministic (no LLM) short caption: current band, how many trailing
+    consecutive days it's held, and — when the band before that streak was
+    different — the direction it moved from, e.g. "Medium 7 days, up from
+    low". Never says whether that direction is good or bad, only which way
+    it moved (see the evaluative-language ban in services/timeline_ai.py).
+    Walks backward from the end of the window; an unlogged day is skipped
+    entirely (only logged days count toward the streak or the prior-band
+    comparison) rather than treated as a same-band day — silence isn't
+    evidence the band held.
+    """
+    logged = [b for (_, _, b) in entries if b is not None]
     if not logged:
         return "No data this window"
-    current_band = logged[-1][1]
-    streak = 0
-    for _, b in reversed(logged):
-        if b != current_band:
-            break
-        streak += 1
+    current_band = logged[-1]
+    idx = len(logged) - 1
+    while idx >= 0 and logged[idx] == current_band:
+        idx -= 1
+    streak = len(logged) - 1 - idx
     label = current_band.capitalize()
-    return f"{label} {streak} day{'s' if streak != 1 else ''}"
+    base = f"{label} {streak} day{'s' if streak != 1 else ''}"
+    if idx >= 0:
+        prior_band = logged[idx]
+        cur_rank, prior_rank = _BAND_ORDER.get(current_band, 0), _BAND_ORDER.get(prior_band, 0)
+        if cur_rank > prior_rank:
+            return f"{base}, up from {prior_band}"
+        if cur_rank < prior_rank:
+            return f"{base}, down from {prior_band}"
+    return base
 
 
 def _numeric_caption(entries: list) -> str:

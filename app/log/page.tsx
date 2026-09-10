@@ -173,6 +173,53 @@ function LabeledSlider({
   );
 }
 
+// ── Word severity selector ──────────────────────────────────────────────────
+//
+// Same 0-10 severity is saved either way — this is a display alternative to
+// the numeric slider (see the "Symptom Scale" setting), not a new scale.
+// Word -> representative value uses the exact band thresholds the rest of
+// the app already buckets by (backend/services/aggregation.py's
+// BAND_THRESHOLDS: low 0-3, medium 4-6, high 7-10), so a word logged here
+// and a number logged elsewhere land in the same band everywhere downstream.
+const WORD_SEVERITY_VALUES = { none: 0, low: 2, medium: 5, high: 8 } as const;
+
+function wordForSeverity(value: number | null): keyof typeof WORD_SEVERITY_VALUES {
+  if (!value) return "none";
+  if (value <= 3) return "low";
+  if (value <= 6) return "medium";
+  return "high";
+}
+
+function WordSeveritySelector({
+  label, value, onChange,
+}: {
+  label: string; value: number | null; onChange: (v: number) => void;
+}) {
+  const active = wordForSeverity(value);
+  return (
+    <div className="space-y-2">
+      <label className="text-base font-semibold text-slate-700">{label}</label>
+      <div className="grid grid-cols-4 gap-2">
+        {(Object.keys(WORD_SEVERITY_VALUES) as (keyof typeof WORD_SEVERITY_VALUES)[]).map(word => (
+          <button
+            key={word}
+            type="button"
+            onClick={() => onChange(WORD_SEVERITY_VALUES[word])}
+            className="py-2.5 rounded-xl border-2 text-sm font-semibold capitalize transition-all"
+            style={{
+              borderColor: active === word ? "#4a7c59" : "#CBD5E1",
+              background: active === word ? "#4a7c59" : "white",
+              color: active === word ? "white" : "#64748B",
+            }}
+          >
+            {word}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Tile ──────────────────────────────────────────────────────────────────────
 
 function Tile({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
@@ -1109,6 +1156,12 @@ function LogPageInner() {
     patient?.dashboard_config?.symptoms?.length ? patient.dashboard_config.symptoms :
     DEFAULT_SYMPTOM_NAMES;
 
+  // Display only — the saved severity is always 0-10 either way (see
+  // WordSeveritySelector). user_config wins over dashboard_config, same
+  // precedence as symptomNames above.
+  const symptomScale: "numeric" | "words" =
+    user?.user_config?.symptom_scale ?? patient?.dashboard_config?.symptom_scale ?? "numeric";
+
   const _activitySlugs =
     user?.user_config?.activities?.length ? user.user_config.activities :
     patient?.dashboard_config?.activities?.length ? patient.dashboard_config.activities :
@@ -1621,6 +1674,23 @@ function LogPageInner() {
           {symptomNames.map(name => {
             const s = draft.symptoms.find(s => s.name === name);
             const activeValue = s?.severity ?? null;
+
+            if (symptomScale === "words") {
+              return (
+                <WordSeveritySelector
+                  key={name}
+                  label={name}
+                  value={activeValue}
+                  onChange={(v) => {
+                    if (v === 0) {
+                      update({ symptoms: draft!.symptoms.filter(s => s.name !== name) });
+                    } else {
+                      setSymptomSeverity(name, v);
+                    }
+                  }}
+                />
+              );
+            }
 
             return (
               <div key={name} className="space-y-2">

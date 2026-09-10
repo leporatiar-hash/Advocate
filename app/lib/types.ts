@@ -38,6 +38,11 @@ export interface DashboardConfig {
   tracking_modules?: string[]; // "sleep" | "hydration" | "vitals" | custom names
   custom_vitals?: string[];    // e.g. ["Weight", "Blood Sugar"]
   show_socialization?: boolean;
+  // Display only — the underlying value logged is still 0-10 either way (no
+  // schema change, same DailyLog.symptoms shape). "words" shows a four-tile
+  // None/Low/Medium/High picker instead of the numeric slider, using the
+  // same band thresholds the clinician-facing views already bucket by.
+  symptom_scale?: "numeric" | "words";
 }
 
 export interface TherapyEntry {

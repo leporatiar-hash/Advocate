@@ -9,7 +9,13 @@ import type { TimelineAxis, TimelineEventItem, TimelineSeriesPoint } from "../..
 // auto-scale its own x-axis independently.
 const VB_W = 320;
 const VB_H = 200;
-const PAD = { top: 18, right: 10, bottom: 18, left: 10 };
+// `left` reserves a dedicated label margin — the axis text lives entirely to
+// the left of PAD.left, at LABEL_X, so it can never sit at the same x as the
+// polyline's own leftmost point (a real, visible bug at the old left:10 —
+// the first day's line and the "Medium" label were drawn on top of each
+// other whenever that day happened to fall in the medium band).
+const PAD = { top: 18, right: 10, bottom: 18, left: 34 };
+const LABEL_X = 4;
 const PLOT_W = VB_W - PAD.left - PAD.right;
 const PLOT_H = VB_H - PAD.top - PAD.bottom;
 
@@ -17,7 +23,6 @@ const PLOT_H = VB_H - PAD.top - PAD.bottom;
 // domain still renders on the same fixed three-row layout, which is what
 // keeps every card's vertical structure comparable at a glance.
 const BAND_ROW: Record<string, number> = { none: 0, low: 0, medium: 1, high: 2 };
-const ROW_LABELS = ["Low", "Medium", "High"];
 
 function xFor(index: number, count: number): number {
   if (count <= 1) return PAD.left + PLOT_W / 2;
@@ -203,17 +208,17 @@ export function TimelineChart({
       {/* Band labels */}
       {axis === "band" && (
         <>
-          <text x={PAD.left} y={PAD.top - 4} fontSize={9} fill="var(--text-secondary)">High</text>
-          <text x={PAD.left} y={VB_H - PAD.bottom + 12} fontSize={9} fill="var(--text-secondary)">Low</text>
+          <text x={LABEL_X} y={PAD.top - 4} fontSize={9} fill="var(--text-secondary)">High</text>
+          <text x={LABEL_X} y={VB_H - PAD.bottom + 12} fontSize={9} fill="var(--text-secondary)">Low</text>
           {expanded && (
-            <text x={PAD.left} y={PAD.top + PLOT_H / 2 + 3} fontSize={9} fill="var(--text-secondary)">Medium</text>
+            <text x={LABEL_X} y={PAD.top + PLOT_H / 2 + 3} fontSize={9} fill="var(--text-secondary)">Medium</text>
           )}
         </>
       )}
       {axis === "numeric" && (
         <>
-          <text x={PAD.left} y={PAD.top - 4} fontSize={9} fill="var(--text-secondary)">{Math.round(max)}</text>
-          <text x={PAD.left} y={VB_H - PAD.bottom + 12} fontSize={9} fill="var(--text-secondary)">{Math.round(min)}</text>
+          <text x={LABEL_X} y={PAD.top - 4} fontSize={9} fill="var(--text-secondary)">{Math.round(max)}</text>
+          <text x={LABEL_X} y={VB_H - PAD.bottom + 12} fontSize={9} fill="var(--text-secondary)">{Math.round(min)}</text>
         </>
       )}
     </svg>

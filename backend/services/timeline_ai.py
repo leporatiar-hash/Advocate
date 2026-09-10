@@ -12,6 +12,7 @@ whenever a demo patient's DailyLog is saved, never inside a request's
 response path — a clinician's GET always reads whatever TimelineCache
 currently holds, stale or fresh, and never blocks on an OpenAI call.
 """
+import calendar
 import json
 import os
 import re
@@ -34,7 +35,22 @@ DEFAULT_TIMEOUT_SECONDS = 8.0
 # every generated sentence before it is ever stored or served. Phrasing here
 # must match the system prompts' own banned-word lists exactly — if you add a
 # rule to a prompt, add the matching term(s) here too, and vice versa.
-BANNED_TERMS = [
+#
+# Four sub-lists, each catching a distinct overclaim:
+#   causal      — states or implies X caused Y, not just that X preceded Y.
+#   diagnostic  — converts a caregiver's plain observation into a clinical
+#                 term the caregiver never used and no clinician confirmed
+#                 (e.g. "he thought the neighbor's car was there for him"
+#                 becoming "paranoia" in a summary — a real failure caught in
+#                 review). "episode of" is banned as a self-applied diagnostic
+#                 label; the bare word "episode" stays allowed when it refers
+#                 to an actual logged episode event (the thing with a start,
+#                 end, and outcome — see models.TimelineEvent), which is a
+#                 fact, not a diagnosis.
+#   evaluative  — bands move up and down; they do not "improve" or "worsen."
+#                 That framing renders a value judgment the system was never
+#                 asked to make.
+CAUSAL_TERMS = [
     "caused", "cause", "causes", "causing",
     "led to", "leads to", "leading to",
     "triggered", "trigger", "triggers", "triggering",
@@ -44,6 +60,8 @@ BANNED_TERMS = [
     "brought on", "bringing on",
     "made him", "made her", "made them",
     "drove", "driving him", "driving her", "driving them",
+]
+DIAGNOSTIC_TERMS = [
     "diagnose", "diagnosed", "diagnosing", "diagnosis",
     "predict", "predicts", "predicted", "predicting", "predictive",
     "detect", "detects", "detected", "detecting",
@@ -53,7 +71,26 @@ BANNED_TERMS = [
     "symptoms of",
     "risk of",
     "likely to",
+    "paranoia", "paranoid",
+    "psychosis", "psychotic",
+    "manic", "mania", "hypomanic", "hypomania",
+    "delusion", "delusional",
+    "hallucination", "hallucinating",
+    "episode of",
+    "decompensating", "decompensated", "decompensation",
+    "relapse", "relapsing", "relapsed",
 ]
+EVALUATIVE_TERMS = [
+    "improved", "improving", "improves", "improve",
+    "worsened", "worsening", "worsens", "worsen",
+    "deteriorated", "deteriorating", "deteriorates", "deteriorate",
+    "better", "worse",
+    "progress", "progressed", "progressing",
+    "decline", "declined", "declining",
+    "stabilized", "stabilizing", "stabilizes",
+    "normalized", "normalizing", "normalizes",
+]
+BANNED_TERMS = CAUSAL_TERMS + DIAGNOSTIC_TERMS + EVALUATIVE_TERMS
 
 _BANNED_PATTERN = re.compile(
     r"\b(" + "|".join(re.escape(t) for t in BANNED_TERMS) + r")\b",
@@ -68,26 +105,119 @@ def find_banned_term(text: str) -> Optional[str]:
     return m.group(0) if m else None
 
 
+_MONTH_TOKEN_PATTERN = "|".join(
+    [m for m in calendar.month_name if m] + [m.rstrip(".") for m in calendar.month_abbr if m]
+)
+_DATE_MENTION_PATTERN = re.compile(
+    r"\b(" + _MONTH_TOKEN_PATTERN + r")\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b", re.IGNORECASE,
+)
+_ISO_DATE_PATTERN = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_NUMERAL_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
+
+_MONTH_NUM_BY_NAME = {
+    name.lower(): i for i, name in enumerate(calendar.month_name) if name
+} | {
+    abbr.lower(): i for i, abbr in enumerate(calendar.month_abbr) if abbr
+}
+
+
+def _allowed_date_mentions(haystack: str) -> set:
+    """Every "<month> <day>" phrasing (long and short month name) that a real
+    ISO date in `haystack` could honestly be rendered as."""
+    allowed = set()
+    for y, m, d in _ISO_DATE_PATTERN.findall(haystack):
+        try:
+            month_num, day_num = int(m), int(d)
+            allowed.add(f"{calendar.month_name[month_num].lower()} {day_num}")
+            allowed.add(f"{calendar.month_abbr[month_num].lower()} {day_num}")
+        except (ValueError, IndexError):
+            continue
+    return allowed
+
+
+def find_fabricated_reference(text: str, facts: dict) -> Optional[str]:
+    """Returns the first date mention or standalone numeral in `text` that
+    cannot be traced back to `facts` — the exact payload the model was given
+    — or None if every one can be. The banned-term list can never catch a
+    wrong but perfectly-phrased number; this is the check that can, and it
+    matters more than the word list. A clinician acting on a fabricated date
+    is the worst failure mode this product can have.
+
+    Deliberately permissive on plain numerals — a substring check against
+    the whole serialized facts blob, not a strict per-token provenance check
+    — to avoid rejecting good output over incidental digit overlap. This
+    also means a caregiver's spelled-out number ("fourteen pounds" in a
+    note) paraphrased into digit form ("14 pounds") in a summary WILL be
+    rejected, since "14" never appears in the raw facts as a digit — an
+    accepted false-positive, not a bug: falling back to the deterministic
+    template on a borderline case is a safe failure; serving an unverifiable
+    number is not.
+    """
+    haystack = json.dumps(facts, default=str)
+    allowed_dates = _allowed_date_mentions(haystack)
+
+    for match in _DATE_MENTION_PATTERN.finditer(text or ""):
+        month_key = match.group(1).lower().rstrip(".")
+        day_num = int(match.group(2))
+        if month_key not in _MONTH_NUM_BY_NAME:
+            continue
+        mention = f"{month_key} {day_num}"
+        if mention not in allowed_dates:
+            return match.group(0)
+
+    for match in _NUMERAL_PATTERN.finditer(text or ""):
+        if match.group(0) not in haystack:
+            return match.group(0)
+
+    return None
+
+
 HEADLINE_SYSTEM_PROMPT = (
     "You are writing a one-paragraph pre-visit headline for a psychiatrist, "
     "from a JSON blob of already-computed facts about one patient's tracked "
     "domains over a specific window. Every date and value you may reference "
     "is in the input — you compute nothing.\n\n"
+    "STRUCTURE: Lead with `lead_domain` — the single largest change this "
+    "window — naming its start and end. Then, if `episodes_in_window` is "
+    "non-empty, name each episode's date range and outcome. Then, if "
+    "`med_change_dates_in_window` is non-empty, name that date as a "
+    "medication change. Only after those does secondary context belong. Do "
+    "not open by listing which domains were tracked — that is not a change, "
+    "it is a table of contents, and it is not what a psychiatrist needs "
+    "before walking in.\n\n"
+    "PERSON: Refer to the patient only as `patient_first_name`, given in the "
+    "input. Never \"the patient,\" \"the individual,\" or \"he\"/\"she\"/\"they\" "
+    "as the primary reference — use the name.\n\n"
     "HARD RULES:\n"
     "1. Under 60 words. One paragraph.\n"
-    "2. Only reference dates and values supplied in the input. Never "
-    "introduce a number.\n"
+    "2. Only reference dates and values supplied in the input, and restate "
+    "them exactly as given. Never introduce a number, and never compute one "
+    "(e.g. a day-count between two dates) yourself even if it seems obvious "
+    "— if that count is not itself a fact in the input, leave it out.\n"
     "3. NO CAUSAL LANGUAGE. Never use: caused, led to, triggered, because, "
     "due to, resulted in, brought on, made him/her/them, drove. Describe "
     "sequence and observation only — \"stopped his medication on Dec 18\" is "
     "allowed; \"stopped his medication because of the weight gain\" is not, "
     "even if a caregiver note says exactly that. The note can say it. You "
     "cannot.\n"
-    "4. NO DIAGNOSTIC OR PREDICTIVE LANGUAGE. Never use: diagnose, predict, "
-    "detect, indicates, suggests, consistent with, symptoms of, risk of, "
-    "likely to.\n"
-    "5. Never infer intent, mood, or internal state that was not logged.\n"
-    "6. If the data does not support a sentence, write less. Silence over "
+    "4. NO DIAGNOSTIC LANGUAGE. Never use: diagnose, predict, detect, "
+    "indicates, suggests, consistent with, symptoms of, risk of, likely to, "
+    "paranoia, paranoid, psychosis, psychotic, manic, mania, hypomanic, "
+    "delusion, delusional, hallucination, decompensating, relapse, "
+    "\"episode of\" (an actual logged episode's own dates/outcome are facts "
+    "you must name — see STRUCTURE — but never characterize a symptom as "
+    "\"an episode of\" something). If a caregiver note describes a belief or "
+    "fear (e.g. thinking a neighbor's car was there for them), describe that "
+    "observation in the caregiver's terms — never translate it into a "
+    "clinical label the caregiver never used.\n"
+    "5. NO EVALUATIVE LANGUAGE. Bands move between named levels (low, "
+    "medium, high) — they do not \"improve,\" \"worsen,\" \"deteriorate,\" get "
+    "\"better\"/\"worse,\" \"progress,\" \"decline,\" \"stabilize,\" or "
+    "\"normalize.\" Say what level it moved from and to; that is the fact. "
+    "Whether that direction is good or bad is a clinical judgment this "
+    "system never makes.\n"
+    "6. Never infer intent, mood, or internal state that was not logged.\n"
+    "7. If the data does not support a sentence, write less. Silence over "
     "speculation.\n\n"
     "Return ONLY valid JSON: {\"headline\": \"...\"} — no markdown fences, no "
     "extra text."
@@ -99,16 +229,28 @@ DOMAIN_SUMMARY_SYSTEM_PROMPT = (
     "values/bands, and the caregiver notes assigned to this domain) over a "
     "specific window. You compute nothing — describe what the notes and the "
     "series show, in sequence. Do not interpret.\n\n"
+    "PERSON: Refer to the patient only as `patient_first_name`, given in the "
+    "input. Never \"the patient,\" \"the individual,\" or \"he\"/\"she\"/\"they\" "
+    "as the primary reference — use the name.\n\n"
     "HARD RULES:\n"
     "1. Three sentences maximum.\n"
-    "2. Only reference dates and values supplied in the input. Never "
-    "introduce a number.\n"
+    "2. Only reference dates and values supplied in the input, and restate "
+    "them exactly as given. Never introduce a number, and never compute one "
+    "(e.g. a day-count since some date) yourself, even if it seems obvious — "
+    "if it is not itself a fact in the input, leave it out.\n"
     "3. NO CAUSAL LANGUAGE: caused, led to, triggered, because, due to, "
     "resulted in, brought on, made him/her/them, drove.\n"
-    "4. NO DIAGNOSTIC OR PREDICTIVE LANGUAGE: diagnose, predict, detect, "
-    "indicates, suggests, consistent with, symptoms of, risk of, likely to.\n"
-    "5. Never infer intent, mood, or internal state that was not logged.\n"
-    "6. If the data does not support a sentence, write less.\n\n"
+    "4. NO DIAGNOSTIC LANGUAGE: diagnose, predict, detect, indicates, "
+    "suggests, consistent with, symptoms of, risk of, likely to, paranoia, "
+    "paranoid, psychosis, psychotic, manic, mania, hypomanic, delusion, "
+    "delusional, hallucination, decompensating, relapse, \"episode of.\" If a "
+    "note describes a belief or fear, describe it in the caregiver's terms — "
+    "never translate it into a clinical label the caregiver never used.\n"
+    "5. NO EVALUATIVE LANGUAGE: improved, worsened, deteriorated, "
+    "better/worse, progress, decline, stabilized, normalized. Bands move "
+    "between named levels — say which levels, not whether that is good.\n"
+    "6. Never infer intent, mood, or internal state that was not logged.\n"
+    "7. If the data does not support a sentence, write less.\n\n"
     "Return ONLY valid JSON: {\"summary\": \"...\"} — no markdown fences, no "
     "extra text."
 )
@@ -226,10 +368,18 @@ def assign_notes_to_domains(notes: list, domain_keys: list, api_key: str, timeou
     return result
 
 
-def validate_ai_text(text: str) -> Optional[str]:
-    """Returns the banned term found, or None if `text` passes. Call before
-    ever storing or serving model output."""
-    return find_banned_term(text)
+def validate_ai_text(text: str, facts: Optional[dict] = None) -> Optional[str]:
+    """Returns the first problem found (a banned term, or — when `facts` is
+    given — a fabricated date/numeral), or None if `text` passes. Call
+    before ever storing or serving model output. `facts` should always be
+    passed in practice; it's optional only so the banned-term-only tests
+    (which don't construct a full facts payload) keep working."""
+    banned = find_banned_term(text)
+    if banned:
+        return banned
+    if facts is not None:
+        return find_fabricated_reference(text, facts)
+    return None
 
 
 def get_latest_log_date(db, patient_id: int) -> Optional[date_type]:
@@ -260,7 +410,7 @@ def _band_or_value(axis: str, entry: Optional[tuple]):
     return band if axis == "band" else value
 
 
-def _generate_window_content(db, patient_id: int, window_days: int, end: date_type, assignments: dict, api_key) -> dict:
+def _generate_window_content(db, patient_id: int, patient_first_name: str, window_days: int, end: date_type, assignments: dict, api_key) -> dict:
     """Headline + one summary per domain, scoped to exactly this window — see
     regenerate_timeline_cache's module note on why this runs once per window
     rather than once over the widest window with the UI re-slicing it: a
@@ -291,6 +441,14 @@ def _generate_window_content(db, patient_id: int, window_days: int, end: date_ty
     domains_raw = build_timeline_domains(logs, date_objs)
     ranked_keys = rank_timeline_domains(domains_raw, window_days)
 
+    from services.aggregation import build_timeline_events
+    timeline_events = (
+        db.query(models.TimelineEvent)
+        .filter(models.TimelineEvent.patient_id == patient_id, models.TimelineEvent.date >= start, models.TimelineEvent.date <= end)
+        .all()
+    )
+    events_in_window = build_timeline_events(logs, timeline_events)
+
     notes = [
         {"date": log.date.isoformat(), "author": _author_name(db, log.logged_by), "text": log.notes}
         for log in logs if log.notes
@@ -312,6 +470,7 @@ def _generate_window_content(db, patient_id: int, window_days: int, end: date_ty
         logged_entries = [e for e in entries if (e[1] is not None if axis == "numeric" else e[2] is not None)]
         domain_notes = [n for n in notes if key in assignments.get(n["date"], [])]
         facts = {
+            "patient_first_name": patient_first_name,
             "label": d["label"],
             "axis": axis,
             "days_logged": len(logged_entries),
@@ -325,7 +484,7 @@ def _generate_window_content(db, patient_id: int, window_days: int, end: date_ty
         if api_key:
             try:
                 candidate = generate_domain_summary(facts, api_key)
-                summary = None if validate_ai_text(candidate) else candidate
+                summary = None if validate_ai_text(candidate, facts) else candidate
             except Exception:
                 summary = None
         if not summary:
@@ -345,8 +504,15 @@ def _generate_window_content(db, patient_id: int, window_days: int, end: date_ty
                 "end": _band_or_value(lead_def["axis"], logged[-1]),
             }
 
+    episode_facts = [
+        {"start": e["start"], "end": e["end"], "outcome": e["outcome"]}
+        for e in events_in_window if e["type"] == "episode"
+    ]
+    med_change_dates = [e["date"] for e in events_in_window if e["type"] == "med_change"]
+
     logged_dates = sorted({log.date for log in logs})
     headline_facts = {
+        "patient_first_name": patient_first_name,
         # The patient's actual logged span within THIS window, not the full
         # padded window — "between Dec 2 and Jan 9" for a 1M view ending
         # mid-episode, not "between Dec 2 and Jan 31" borrowed from a wider
@@ -357,12 +523,17 @@ def _generate_window_content(db, patient_id: int, window_days: int, end: date_ty
         "days_in_range": real_days_in_range,
         "lead_domain": lead_facts,
         "ranked_domains": ranked_keys,
+        # Named explicitly so the prompt can require surfacing them rather
+        # than leaving it to chance whether the model notices an episode or
+        # med-change buried in the ranked-domain data.
+        "episodes_in_window": episode_facts,
+        "med_change_dates_in_window": med_change_dates,
     }
     headline = None
     if api_key:
         try:
             candidate = generate_headline(headline_facts, api_key)
-            headline = None if validate_ai_text(candidate) else candidate
+            headline = None if validate_ai_text(candidate, headline_facts) else candidate
         except Exception:
             headline = None
     if not headline:
@@ -406,6 +577,7 @@ def regenerate_timeline_cache(patient_id: int) -> None:
         patient = db.query(models.Patient).filter(models.Patient.id == patient_id).first()
         if not patient or not patient.is_demo:
             return
+        patient_first_name = (patient.name or "").split()[0] if patient.name else "the patient"
 
         cache = db.query(models.TimelineCache).filter(models.TimelineCache.patient_id == patient_id).first()
         if not cache:
@@ -450,7 +622,7 @@ def regenerate_timeline_cache(patient_id: int) -> None:
 
         windows_content = {}
         for window_key, window_days in TIMELINE_WINDOWS.items():
-            windows_content[window_key] = _generate_window_content(db, patient_id, window_days, end, assignments, api_key)
+            windows_content[window_key] = _generate_window_content(db, patient_id, patient_first_name, window_days, end, assignments, api_key)
 
         cache.content = {
             "note_assignments": assignments,

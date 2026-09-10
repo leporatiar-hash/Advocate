@@ -167,6 +167,9 @@ export default function CustomizePage() {
   // Dose timing
   const [doseTimingMode, setDoseTimingMode] = useState<"quick" | "simple" | "exact">("quick");
 
+  // Symptom scale — display only, the logged value is still 0-10 either way
+  const [symptomScale, setSymptomScale] = useState<"numeric" | "words">("numeric");
+
   // Socialization
   const [showSocialization, setShowSocialization] = useState(true);
   const [contacts, setContacts] = useState<SocialContact[]>([]);
@@ -189,6 +192,7 @@ export default function CustomizePage() {
     setShowAlcohol(sf.includes("alcohol"));
     setCustomSubstances(sf.filter((s: string) => s !== "cigarettes" && s !== "alcohol"));
     setDoseTimingMode(cfg.dose_timing_mode ?? "quick");
+    setSymptomScale(cfg.symptom_scale ?? "numeric");
     setShowSocialization(cfg.show_socialization !== false);
   }, []);
 
@@ -346,6 +350,7 @@ export default function CustomizePage() {
           ...customSubstances,
         ],
         dose_timing_mode: doseTimingMode,
+        symptom_scale: symptomScale,
         show_socialization: showSocialization,
       };
       const updated = await api.updateUserConfig(updates) as User;
@@ -472,6 +477,39 @@ export default function CustomizePage() {
                       : mode === "simple"
                       ? "Morning · Afternoon · Evening · Night"
                       : "Pick the precise time for each dose"}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </Section>
+
+        {/* ── Symptom Scale ── */}
+        <Section title="Symptom Scale" subtitle="How severity is shown when logging symptoms — the value saved is the same either way">
+          <div className="space-y-3">
+            {(["numeric", "words"] as const).map(scale => (
+              <button
+                key={scale}
+                type="button"
+                onClick={() => setSymptomScale(scale)}
+                className="w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all"
+                style={{
+                  borderColor: symptomScale === scale ? "#4a7c59" : "#CBD5E1",
+                  background: symptomScale === scale ? "#f2f7f3" : "white",
+                }}
+              >
+                <div
+                  className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                  style={{ borderColor: symptomScale === scale ? "#4a7c59" : "#CBD5E1" }}
+                >
+                  {symptomScale === scale && <div className="w-2.5 h-2.5 rounded-full" style={{ background: "#4a7c59" }} />}
+                </div>
+                <div>
+                  <p className="text-base font-semibold text-navy">
+                    {scale === "numeric" ? "Numbers" : "Words"}
+                  </p>
+                  <p className="text-sm text-slate-500 mt-0.5">
+                    {scale === "numeric" ? "A slider from 0 to 10" : "None · Low · Medium · High"}
                   </p>
                 </div>
               </button>
