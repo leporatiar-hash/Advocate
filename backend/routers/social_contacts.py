@@ -6,7 +6,7 @@ from typing import List
 from database import get_db
 import models
 import schemas
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 
 router = APIRouter()
 
@@ -30,7 +30,7 @@ def list_contacts(
 def create_contact(
     data: schemas.SocialContactCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     count = (
         db.query(models.SocialContact)
@@ -55,7 +55,7 @@ def create_contact(
 def delete_contact(
     contact_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     contact = (
         db.query(models.SocialContact)

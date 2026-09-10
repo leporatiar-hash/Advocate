@@ -76,3 +76,17 @@ async def get_current_clinician(
     if current_user.role != models.UserRole.clinician:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Clinician access required")
     return current_user
+
+
+async def require_not_clinician(
+    current_user: models.User = Depends(get_current_user),
+) -> models.User:
+    """The inverse of get_current_clinician — a deny-list dependency for
+    every write endpoint. The clinician role is read-only by design (see the
+    clinician timeline build): enforced here, at the router, not by hiding
+    buttons in a UI a clinician session could bypass by calling the API
+    directly. Returns the same models.User a plain get_current_user would,
+    so swapping the dependency requires no change to the handler body."""
+    if current_user.role == models.UserRole.clinician:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Clinicians have read-only access")
+    return current_user

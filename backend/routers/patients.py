@@ -11,7 +11,7 @@ from openai import OpenAI
 from database import get_db
 import models
 import schemas
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 
 load_dotenv()
 
@@ -22,7 +22,7 @@ router = APIRouter()
 def create_patient(
     patient_data: schemas.PatientCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     patient = models.Patient(
         name=patient_data.name,
@@ -85,7 +85,7 @@ def update_patient(
     patient_id: int,
     data: schemas.PatientUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     patient = (
         db.query(models.Patient)
@@ -110,7 +110,7 @@ def add_medication(
     patient_id: int,
     med_data: schemas.MedicationCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     patient = (
         db.query(models.Patient)
@@ -169,7 +169,7 @@ def upsert_treatment_plan(
     patient_id: int,
     data: schemas.TreatmentPlanCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     _get_owned_patient(patient_id, current_user, db)
     plan = db.query(models.TreatmentPlan).filter(models.TreatmentPlan.patient_id == patient_id).first()
@@ -202,7 +202,7 @@ def generate_config(
     patient_id: int,
     survey: schemas.IntakeSurveyRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     patient = (
         db.query(models.Patient)
@@ -333,7 +333,7 @@ def get_share_code(
 def create_share_code(
     patient_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     """Issue a code, replacing any existing active one.
 
@@ -364,7 +364,7 @@ def create_share_code(
 def revoke_share_code(
     patient_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     """Stop the code working. Does NOT remove clinicians who already redeemed —
     that's the /clinicians endpoints below, and the UI must not conflate them."""
@@ -408,7 +408,7 @@ def revoke_clinician_access(
     patient_id: int,
     clinician_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     """Cut off a clinician who already has access. Takes effect on their next
     request — the portal re-checks the link on every call rather than trusting

@@ -94,10 +94,19 @@ export interface Symptom {
   worse_than_usual?: boolean;
 }
 
+export type EpisodeOutcome = "held_at_home" | "crisis_line" | "ed_visit" | "admitted";
+
 export interface Episode {
   occurred: boolean;
   time: string;
   description: string;
+  outcome?: EpisodeOutcome | null;
+  // Present only when backfilling an episode that spans days before today's
+  // log date — start/end describe the episode itself, independent of which
+  // day's entry this is filed under. Absent for a same-day episode (start/end
+  // both default to this entry's own date on the backend).
+  start?: string | null;
+  end?: string | null;
 }
 
 export interface Vitals {
@@ -523,4 +532,67 @@ export interface SavedSummary {
   date_range_start: string;
   date_range_end: string;
   created_at: string;
+}
+
+// ── Clinician timeline (demo build, NOT the production clinician portal) ────
+
+export type TimelineWindow = "1m" | "2m" | "3m" | "12m";
+export type TimelineBand = "none" | "low" | "medium" | "high";
+export type TimelineAxis = "band" | "numeric";
+
+export interface TimelineSeriesPoint {
+  date: string;
+  band: TimelineBand | null;
+  value: number | null;
+}
+
+export interface TimelineNote {
+  date: string;
+  author: string;
+  text: string;
+}
+
+export interface TimelineDomain {
+  key: string;
+  label: string;
+  axis: TimelineAxis;
+  caption: string;
+  series: TimelineSeriesPoint[];
+  summary: string | null;
+  summary_generated_at: string | null;
+  notes: TimelineNote[];
+}
+
+export interface TimelineEpisodeEvent {
+  type: "episode";
+  start: string;
+  end: string;
+  outcome: string | null;
+  logged_at: string;
+}
+
+export interface TimelineMarkerEvent {
+  type: "med_change";
+  date: string;
+  label: string;
+}
+
+export type TimelineEventItem = TimelineEpisodeEvent | TimelineMarkerEvent;
+
+export interface TimelineResponse {
+  patient: {
+    name: string;
+    range_start: string;
+    range_end: string;
+    days_in_range: number;
+    days_logged: number;
+    authors: string[];
+  };
+  headline: string;
+  headline_generated_at: string | null;
+  pending: boolean;
+  available_windows: TimelineWindow[];
+  events: TimelineEventItem[];
+  domains: TimelineDomain[];
+  other_notes: TimelineNote[];
 }

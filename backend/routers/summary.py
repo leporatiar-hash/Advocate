@@ -10,7 +10,7 @@ from openai import OpenAI
 
 from database import get_db
 import models
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 from routers.medications import lookup_known_side_effects
 from instruments import INSTRUMENTS
 from services.aggregation import build_patient_aggregate
@@ -101,7 +101,7 @@ def generate_summary(
     start_date: Optional[date_type] = Query(None),
     end_date: Optional[date_type] = Query(None),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     patient = (
         db.query(models.Patient)

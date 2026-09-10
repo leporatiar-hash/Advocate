@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from database import get_db
 import models
 import schemas
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 from instruments import INSTRUMENTS, compute_score, validate_responses
 
 router = APIRouter()
@@ -45,7 +45,7 @@ def get_instrument_definitions():
 def create_assessment(
     body: schemas.AssessmentCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     _verify_patient(body.patient_id, current_user, db)
 

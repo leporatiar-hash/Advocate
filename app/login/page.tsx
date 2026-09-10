@@ -9,6 +9,7 @@ import { Lora, DM_Sans } from "next/font/google";
 import { api } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import type { AuthResponse } from "../lib/types";
+import { postLoginDestination } from "../lib/demoTimeline";
 
 const lora = Lora({ subsets: ["latin"], variable: "--font-lora", weight: ["400", "500", "600"], style: ["normal", "italic"], display: "swap" });
 const dmSans = DM_Sans({ subsets: ["latin"], variable: "--font-dm-sans", weight: ["300", "400", "500"], display: "swap" });
@@ -29,7 +30,7 @@ export default function LoginPage() {
     try {
       const res = await api.login({ email, password }) as AuthResponse;
       login(res.user, res.access_token);
-      router.push(res.user.role === "clinician" ? "/clinician" : "/dashboard");
+      router.push(postLoginDestination(res.user.role, res.user.email));
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Login failed");
     } finally {

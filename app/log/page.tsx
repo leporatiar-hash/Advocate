@@ -8,7 +8,7 @@ import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
-import type { Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan } from "../lib/types";
+import type { Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome } from "../lib/types";
 import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS } from "../lib/constants";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -236,12 +236,6 @@ function YesNoToggle({ value, onChange }: { value: boolean | null; onChange: (v:
       })}
     </div>
   );
-}
-
-interface Episode {
-  occurred: boolean;
-  time: string;
-  description: string;
 }
 
 interface Vitals {
@@ -1688,6 +1682,40 @@ function LogPageInner() {
                     className="w-full px-4 py-3 rounded-xl border border-rose-200 text-navy text-base focus:outline-none resize-none bg-white"
                   />
                 </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm text-slate-500">What happened as a result?</label>
+                  <select
+                    value={draft.episode.outcome ?? ""}
+                    onChange={e => updateEpisode({ outcome: (e.target.value || null) as EpisodeOutcome | null })}
+                    className="w-full px-4 py-3 rounded-xl border border-rose-200 text-navy text-base focus:outline-none bg-white"
+                  >
+                    <option value="">Not sure yet</option>
+                    <option value="held_at_home">Held at home</option>
+                    <option value="crisis_line">Called the crisis line</option>
+                    <option value="ed_visit">ER visit</option>
+                    <option value="admitted">Admitted</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm text-slate-500">This started on an earlier day</label>
+                  <Toggle
+                    value={draft.episode.start != null}
+                    onChange={v => updateEpisode({ start: v ? draft.episode.start ?? draft.date : null })}
+                  />
+                </div>
+                {draft.episode.start != null && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm text-slate-500">Started on</label>
+                    <input
+                      type="date" value={draft.episode.start ?? draft.date} max={draft.date}
+                      onChange={e => updateEpisode({ start: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-rose-200 text-navy text-base focus:outline-none bg-white"
+                    />
+                    <p className="text-xs text-slate-400">
+                      Logged today ({draft.date}); shown on the clinician timeline as {draft.episode.start ?? draft.date} through {draft.date}.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </div>

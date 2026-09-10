@@ -5,7 +5,7 @@ from typing import List
 from database import get_db
 from models import SavedSummary, Patient
 from schemas import SavedSummaryCreate, SavedSummaryResponse
-from routers.auth import get_current_user
+from auth import get_current_user, require_not_clinician
 from models import User
 
 router = APIRouter()
@@ -15,7 +15,7 @@ router = APIRouter()
 def save_summary(
     data: SavedSummaryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_not_clinician),
 ):
     patient = db.query(Patient).filter(
         Patient.id == data.patient_id,
@@ -55,7 +55,7 @@ def get_saved_summaries(
 def delete_saved_summary(
     summary_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_not_clinician),
 ):
     record = db.query(SavedSummary).filter(
         SavedSummary.id == summary_id,

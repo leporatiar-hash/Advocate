@@ -8,7 +8,7 @@ import anthropic
 from database import get_db
 import models
 import schemas
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 
 load_dotenv()
 
@@ -33,7 +33,7 @@ _DEFAULT_USER_CONFIG = {
 def complete_onboarding_survey(
     survey: schemas.OnboardingSurveyRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     config = _DEFAULT_USER_CONFIG.copy()
 

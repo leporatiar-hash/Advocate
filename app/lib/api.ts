@@ -239,6 +239,11 @@ export const api = {
     request(
       `/clinicians/patient/${patientId}/symptom-ticker?delta_window_days=${deltaWindowDays}&chart_window_days=${chartWindowDays}`
     ),
+
+  // Demo-only clinician timeline (Radial pilot) — NOT the production
+  // clinician portal. See backend/routers/clinician_timeline.py.
+  getClinicianTimeline: (patientId: number, window: "1m" | "2m" | "3m" | "12m") =>
+    request(`/clinician/patient/${patientId}/timeline?window=${window}`),
   getClinicianLog: (patientId: number, dateStr: string) =>
     request(`/clinicians/patient/${patientId}/log/${dateStr}`),
 };

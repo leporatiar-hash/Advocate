@@ -55,4 +55,5 @@ ios/App/App/public/
 backend/.venv/
 backend/demo.db
 demo.db
+*.db
 *.db-journal

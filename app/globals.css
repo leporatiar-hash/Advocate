@@ -85,6 +85,32 @@ input[type="range"]::-moz-range-thumb {
 .clinician-portal .cp-tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* Clinician TIMELINE — demo build for the Radial pilot conversation, NOT the
+   production clinician portal above. Deliberately its own token set
+   (surface-0, surface-1, text-primary, border, font-voice) instead of the
+   .clinician-portal cp- prefixed tokens: this is a separate, forward-looking
+   surface, not a mode of the existing portal. --font-voice is set inline by
+   TimelineClient via next/font (Lora), matching the "these are the
+   caregiver's actual words" treatment used for verbatim quotes elsewhere in
+   the clinician-facing UI. */
+.clinician-timeline {
+  --surface-0: #FAFAF7;
+  --surface-1: #FFFFFF;
+  --text-primary: #1A2420;
+  --text-secondary: #6B7280;
+  --border: #E5E7EB;
+  --accent: #0F6B66;
+  --episode-band: #F7C1C1;
+  --med-change-line: #888780;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+.clinician-timeline .tl-tabular {
+  font-variant-numeric: tabular-nums;
+}
 /* Brief flash when an insight's "N notes" affordance scrolls a raw note into
    view — confirms which note the click actually revealed. */
 .clinician-portal .note-highlight {

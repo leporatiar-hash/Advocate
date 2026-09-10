@@ -36,6 +36,12 @@ class Patient(Base):
     notes = Column(Text, nullable=True)
     caregiver_id = Column(Integer, ForeignKey("users.id"))
     dashboard_config = Column(JSON, nullable=True)
+    # Demo-gate for the clinician timeline build (see routers/clinician_timeline.py):
+    # that endpoint's query filters on is_demo == True and 404s otherwise — a
+    # database filter, not a UI filter, so a clinician account cannot retrieve a
+    # real caregiver's logs through it even by guessing an ID. Fake data only;
+    # never set true on a record with real PHI.
+    is_demo = Column(Boolean, default=False, nullable=False)
 
     caregiver = relationship("User", back_populates="patients")
     medications = relationship("Medication", back_populates="patient")
@@ -248,6 +254,48 @@ class ClinicianNoteSynthesis(Base):
     end_date = Column(Date, nullable=False)
     generated_at = Column(DateTime, default=datetime.utcnow)
     content = Column(JSON, nullable=False)
+
+    patient = relationship("Patient", foreign_keys=[patient_id])
+
+
+class TimelineEvent(Base):
+    """A discrete, dated marker on the clinician timeline — currently only
+    "med_change" — that doesn't belong on any single day's DailyLog row (it's
+    not a caregiver-logged observation, and DailyLog's schema stays untouched
+    by this whole feature). Demo-only; created by backend/scripts/seed_demo_patient.py,
+    never by any caregiver-facing UI.
+    """
+    __tablename__ = "timeline_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
+    type = Column(String, nullable=False)  # "med_change"
+    date = Column(Date, nullable=False)
+    label = Column(String, nullable=False)
+
+    patient = relationship("Patient", foreign_keys=[patient_id])
+
+
+class TimelineCache(Base):
+    """Cached AI text for the clinician timeline (headline + one summary per
+    domain) — one row per patient, overwritten on regeneration. Unlike
+    ClinicianNoteSynthesis above (regenerated only by a hand-run script), this
+    is regenerated automatically whenever a demo patient's DailyLog is saved
+    (see routers/logs.py) via a FastAPI background task, so the timeline never
+    blocks a page load on an OpenAI call and never goes stale behind a log
+    save during a live demo. `content` holds
+    {"headline": str, "headline_generated_at": iso str,
+     "domains": {domain_key: {"summary": str, "generated_at": iso str}}}.
+    A row may be read mid-regeneration (previous content still in place, a
+    `pending` row exists) — see get_or_create in services/timeline_ai.py.
+    """
+    __tablename__ = "timeline_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id"), unique=True, nullable=False)
+    content = Column(JSON, nullable=False)
+    pending = Column(Boolean, default=False, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     patient = relationship("Patient", foreign_keys=[patient_id])
 

@@ -1176,3 +1176,240 @@ def build_top_flag(observation_periods: list, symptom_stats: dict) -> Optional[d
         "quote": notes_text,
         "note_id": date_str,
     }
+
+
+# ── Clinician Timeline (demo) ────────────────────────────────────────────────
+#
+# Backs GET /clinician/patient/{id}/timeline (routers/clinician_timeline.py).
+# Demo-only feature, gated by models.Patient.is_demo — see that column's
+# comment. Six tracked domains, each either a "band" (low/medium/high, a
+# display-layer bucketing of an underlying value — DailyLog itself is never
+# changed) or "numeric" (weight, its own pounds axis, never banded).
+
+# Anxiety's band thresholds — the existing 0-10 DailyLog.symptoms severity
+# scale, unchanged. Named constants so every cut point lives in one place.
+BAND_THRESHOLDS = {"low": (0, 3), "medium": (4, 6), "high": (7, 10)}
+
+# Sleep hours has its own scale — under 5h is short, over 9h is long.
+SLEEP_BAND_THRESHOLDS = {"low": (0, 4.999), "medium": (5, 9), "high": (9.001, 999)}
+
+# Medication adherence is a rolling 7-day percentage, not a single day's value.
+MEDICATION_BAND_THRESHOLDS = {"low": (0, 49.999), "medium": (50, 89.999), "high": (90, 100)}
+
+# Cigarettes: DailyLog.vitals.cigarettes is a real existing caregiver-facing
+# field (a same-day count, entered via the "Cigarettes today" stepper in
+# app/log/page.tsx — schemas.py types `vitals` as a loose Any, so no schema
+# change was needed). No thresholds were specified for it, so these were
+# chosen to line up with the counts actually named in caregiver notes in this
+# domain's seed data ("two or three" -> low, "six or seven" -> medium,
+# "fifteen" / "most of a pack" -> high).
+CIGARETTE_THRESHOLDS = {"none": (0, 0), "low": (1, 5), "medium": (6, 10), "high": (11, 999)}
+
+TIMELINE_WINDOWS = {"1m": 31, "2m": 61, "3m": 91, "12m": 366}
+
+TIMELINE_DOMAIN_DEFS = [
+    {"key": "anxiety", "label": "Anxiety", "axis": "band"},
+    {"key": "sleep", "label": "Sleep", "axis": "band"},
+    {"key": "socialization", "label": "Socialization", "axis": "band"},
+    {"key": "cigarettes", "label": "Cigarettes", "axis": "band"},
+    {"key": "medication", "label": "Medication", "axis": "band"},
+    {"key": "weight", "label": "Weight", "axis": "numeric"},
+]
+
+
+def _threshold_band(value: Optional[float], thresholds: dict) -> Optional[str]:
+    if value is None:
+        return None
+    for band, (lo, hi) in thresholds.items():
+        if lo <= value <= hi:
+            return band
+    return None
+
+
+def _anxiety_value(log) -> Optional[float]:
+    for s in (log.symptoms or []):
+        if (s.get("name") or "").strip().lower() == "anxiety":
+            return s.get("severity")
+    return None
+
+
+def _cigarette_value(log) -> Optional[float]:
+    raw = (log.vitals or {}).get("cigarettes")
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _socialization_band(log) -> Optional[str]:
+    """No single existing field is a direct low/medium/high band. `quality`
+    (schemas.Socialization) is only ever set when had_contact is True — a
+    caregiver-rated quality of a specific social contact, not "how social was
+    today" — so a no-contact day would otherwise read as unlogged rather than
+    "low." Falls back to left_house when quality is absent: stayed home ->
+    low, left the house with no rated contact -> medium. Both real existing
+    fields; nothing new added to reach a 3-level band."""
+    soc = log.socialization or {}
+    quality = soc.get("quality")
+    if quality == "good":
+        return "high"
+    if quality == "neutral":
+        return "medium"
+    if quality == "difficult":
+        return "low"
+    if soc.get("left_house") is False:
+        return "low"
+    if soc.get("left_house") is True:
+        return "medium"
+    return None
+
+
+def _weight_value(log) -> Optional[float]:
+    return (log.vitals or {}).get("weight_lb")
+
+
+def _medication_adherence_series(logs_by_date: dict, dates: list) -> dict:
+    """Rolling 7-day adherence % ending on each date, over days that actually
+    logged a medication entry — an unlogged day is excluded from both the
+    numerator and denominator, never counted as a missed dose. Same "a gap is
+    a gap" convention used everywhere else in this file."""
+    result = {}
+    for i, d in enumerate(dates):
+        window_dates = dates[max(0, i - 6): i + 1]
+        taken = 0
+        total = 0
+        for wd in window_dates:
+            log = logs_by_date.get(wd)
+            if not log or not log.medications_taken:
+                continue
+            for m in log.medications_taken:
+                total += 1
+                if m.get("taken"):
+                    taken += 1
+        result[d] = (taken / total * 100) if total else None
+    return result
+
+
+def build_timeline_domains(logs: list, dates: list) -> dict:
+    """One entry per TIMELINE_DOMAIN_DEFS key: a list of (date, raw_value,
+    band) tuples, one per date in `dates` (every calendar day in the window,
+    ascending). `band` is always None for the numeric (weight) domain. A date
+    with no DailyLog row, or a row that didn't populate that particular
+    field, produces (date, None, None) — explicit, never omitted, never
+    filled — matching the response contract's "unlogged days are explicit"
+    rule.
+    """
+    logs_by_date = {log.date: log for log in logs}
+    adherence_by_date = _medication_adherence_series(logs_by_date, dates)
+
+    domains: dict = {d["key"]: [] for d in TIMELINE_DOMAIN_DEFS}
+    for d in dates:
+        log = logs_by_date.get(d)
+        anxiety_val = _anxiety_value(log) if log else None
+        sleep_val = log.sleep_hours if log else None
+        weight_val = _weight_value(log) if log else None
+        cig_val = _cigarette_value(log) if log else None
+        soc_band = _socialization_band(log) if log else None
+        adherence_val = adherence_by_date.get(d)
+
+        domains["anxiety"].append((d, anxiety_val, _threshold_band(anxiety_val, BAND_THRESHOLDS)))
+        domains["sleep"].append((d, sleep_val, _threshold_band(sleep_val, SLEEP_BAND_THRESHOLDS)))
+        # No underlying number backs socialization's band (see
+        # _socialization_band) — value is null, not a fabricated number.
+        domains["socialization"].append((d, None, soc_band))
+        domains["cigarettes"].append((d, cig_val, _threshold_band(cig_val, CIGARETTE_THRESHOLDS)))
+        domains["medication"].append((d, adherence_val, _threshold_band(adherence_val, MEDICATION_BAND_THRESHOLDS)))
+        domains["weight"].append((d, weight_val, None))
+
+    return domains
+
+
+def _domain_magnitude_and_density(entries: list, axis: str, window_days: int) -> tuple:
+    """magnitude_of_change: number of transitions between consecutive LOGGED
+    (non-null) values, plus 1 if the first logged value differs from the
+    last. An unlogged day is silence, not a data point, so it can never
+    itself be part of a transition. Band domains transition on band; the
+    numeric (weight) domain transitions on the raw value, since it has no
+    band. logging_density: days logged for this domain / days in window."""
+    if axis == "numeric":
+        logged = [v for (_, v, _) in entries if v is not None]
+    else:
+        logged = [b for (_, _, b) in entries if b is not None]
+
+    magnitude = sum(1 for a, b in zip(logged, logged[1:]) if a != b)
+    if logged and logged[0] != logged[-1]:
+        magnitude += 1
+    density = (len(logged) / window_days) if window_days else 0
+    return magnitude, density
+
+
+def rank_timeline_domains(domains: dict, window_days: int) -> list:
+    """Deterministic, server-side, no LLM: score = magnitude_of_change *
+    logging_density, descending; ties break alphabetically by key so the
+    order is stable across reloads. Weight is always included regardless of
+    score — with exactly six domains defined today that's automatic, but the
+    guarantee is enforced explicitly here so adding a seventh domain later
+    can't silently bump weight out of the top six.
+    """
+    axis_by_key = {d["key"]: d["axis"] for d in TIMELINE_DOMAIN_DEFS}
+    scored = []
+    for key, entries in domains.items():
+        magnitude, density = _domain_magnitude_and_density(entries, axis_by_key[key], window_days)
+        scored.append((key, magnitude * density))
+
+    scored.sort(key=lambda kv: (-kv[1], kv[0]))
+    ranked_keys = [k for k, _ in scored]
+
+    top = ranked_keys[:6]
+    if "weight" not in top and "weight" in ranked_keys:
+        top = top[:5] + ["weight"]
+    return top
+
+
+def _next_day_iso(iso_date: str) -> str:
+    return (date_type.fromisoformat(iso_date) + timedelta(days=1)).isoformat()
+
+
+def build_timeline_events(logs: list, timeline_events: list) -> list:
+    """Episode spans (adjacent/overlapping DailyLog.episode entries collapsed
+    into one event each — see classify note on TimelineEvent for why med
+    changes live in their own table instead of here) plus patient-level
+    TimelineEvent rows, sorted by date ascending.
+
+    A caregiver's single backfilled entry already carries an explicit
+    start/end wider than its own `date` (see routers/logs.py's episode
+    handling) — this only needs to *merge*, not invent, spans: multiple
+    occurred=True rows on physically adjacent dates (the plain day-by-day
+    case, no backfill) still collapse into one bar the same way.
+    """
+    spans = []
+    for log in logs:
+        ep = log.episode or {}
+        if not ep.get("occurred"):
+            continue
+        start = ep.get("start") or log.date.isoformat()
+        end = ep.get("end") or log.date.isoformat()
+        logged_at = ep.get("logged_at") or log.created_at.date().isoformat()
+        spans.append({"start": start, "end": end, "outcome": ep.get("outcome"), "logged_at": logged_at})
+
+    spans.sort(key=lambda s: s["start"])
+    merged: list = []
+    for s in spans:
+        if merged and s["start"] <= _next_day_iso(merged[-1]["end"]):
+            merged[-1]["end"] = max(merged[-1]["end"], s["end"])
+            merged[-1]["logged_at"] = max(merged[-1]["logged_at"], s["logged_at"])
+            merged[-1]["outcome"] = merged[-1]["outcome"] or s["outcome"]
+        else:
+            merged.append(dict(s))
+
+    events = [
+        {"type": "episode", "start": m["start"], "end": m["end"], "outcome": m["outcome"], "logged_at": m["logged_at"]}
+        for m in merged
+    ]
+    for te in timeline_events:
+        events.append({"type": te.type, "date": te.date.isoformat(), "label": te.label})
+
+    events.sort(key=lambda e: e.get("start") or e.get("date"))
+    return events

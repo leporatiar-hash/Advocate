@@ -7,6 +7,7 @@ import Image from "next/image";
 import toast from "react-hot-toast";
 import { Lora, DM_Sans } from "next/font/google";
 import { api } from "../lib/api";
+import { isDemoTimelineClinician, DEMO_TIMELINE_PATIENT_ID } from "../lib/demoTimeline";
 import { useAuth } from "../components/AuthProvider";
 import type { AuthResponse } from "../lib/types";
 
@@ -67,7 +68,10 @@ export default function RegisterPage() {
       toast.success(`Welcome, ${res.user.name}!`);
       // Caregiver onboarding sets up a patient, which makes no sense for a
       // clinician — they get patients only by redeeming a share code.
-      router.push(role === "clinician" ? "/clinician" : "/onboarding");
+      const clinicianDestination = isDemoTimelineClinician(res.user.email)
+        ? `/clinician/${DEMO_TIMELINE_PATIENT_ID}/`
+        : "/clinician";
+      router.push(role === "clinician" ? clinicianDestination : "/onboarding");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Registration failed");
     } finally {

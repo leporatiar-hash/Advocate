@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, defer
 from typing import List, Optional
 from datetime import datetime, timedelta, date as date_type
@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date as date_type
 from database import get_db
 import models
 import schemas
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 
 router = APIRouter()
 
@@ -57,8 +57,9 @@ def _verify_patient(patient_id: int, current_user: models.User, db: Session) -> 
 @router.post("/", response_model=schemas.DailyLogResponse)
 def create_or_update_log(
     log_data: schemas.DailyLogCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     patient = (
         db.query(models.Patient)
@@ -102,17 +103,46 @@ def create_or_update_log(
             setattr(existing, key, val)
         db.commit()
         db.refresh(existing)
-        return existing
+        log = existing
+    else:
+        log = models.DailyLog(
+            patient_id=log_data.patient_id,
+            logged_by=current_user.id,
+            date=log_data.date,
+            **fields,
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
 
-    log = models.DailyLog(
-        patient_id=log_data.patient_id,
-        logged_by=current_user.id,
-        date=log_data.date,
-        **fields,
-    )
-    db.add(log)
-    db.commit()
-    db.refresh(log)
+    # Demo-only: the clinician timeline's headline and domain summaries are
+    # generated on write and cached (see services/timeline_ai.py), never on
+    # page load. Gated on is_demo so a real caregiver's log save never spends
+    # an OpenAI call or a background task on this — it's dead weight for
+    # every patient this feature doesn't apply to.
+    #
+    # Debounce: one regeneration is 4 windows x 7 calls = ~29 OpenAI calls
+    # (see regenerate_timeline_cache's docstring). A caregiver saving several
+    # fields in quick succession, or catching up on a run of backfilled days,
+    # would otherwise fire one full regeneration per save. If a regeneration
+    # is already in flight (`pending`), skip scheduling another — the
+    # in-flight one will pick up this save's data on the NEXT save instead of
+    # duplicating work for a save that landed a few seconds apart. This is a
+    # concurrency cap, not a real delayed-coalescing debounce (FastAPI's
+    # BackgroundTasks has no delay/cancel primitive to build one on); a
+    # pilot with real traffic should replace this with an actual task queue
+    # (e.g. a few seconds of coalescing per patient) rather than stretching
+    # this further.
+    if patient.is_demo:
+        already_pending = (
+            db.query(models.TimelineCache.id)
+            .filter(models.TimelineCache.patient_id == patient.id, models.TimelineCache.pending == True)  # noqa: E712
+            .first()
+        )
+        if not already_pending:
+            from services.timeline_ai import regenerate_timeline_cache
+            background_tasks.add_task(regenerate_timeline_cache, patient.id)
+
     return log
 
 
@@ -213,7 +243,7 @@ def quick_log(
     patient_id: int,
     body: schemas.QuickLogRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     _verify_patient(patient_id, current_user, db)
 
@@ -301,7 +331,7 @@ def correct_medication_taken(
     date_str: str,
     body: schemas.MedicationTakenCorrection,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     """Marks a single medication as taken for one day, without touching any
     other field on that day's log. Used by the summary page's "Something look

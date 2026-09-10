@@ -10,7 +10,7 @@ from medications_reference import COMMON_MEDICATIONS
 from database import get_db
 import models
 import schemas
-from auth import get_current_user
+from auth import get_current_user, require_not_clinician
 
 router = APIRouter()
 
@@ -471,7 +471,7 @@ def update_medication(
     medication_id: int,
     med_data: schemas.MedicationUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     med = _get_owned_medication(medication_id, current_user, db)
     for field, value in med_data.model_dump(exclude_unset=True).items():
@@ -485,7 +485,7 @@ def update_medication(
 def deactivate_medication(
     medication_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_not_clinician),
 ):
     med = _get_owned_medication(medication_id, current_user, db)
     med.active = False
