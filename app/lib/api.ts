@@ -56,6 +56,13 @@ export function clearStoredAuth(): void {
   window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
 }
 
+// Without this, a stalled connection (flaky wifi, a dropped packet, a proxy
+// that never closes the socket) leaves `fetch` pending indefinitely — nothing
+// throws, so a submit button reading `loading` state spins forever with no
+// feedback at all. 20s is generous for a cold Railway instance waking up, but
+// finite, so a genuinely stuck request always resolves into a visible error.
+const REQUEST_TIMEOUT_MS = 20000;
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -66,13 +73,27 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-    credentials: "include",
-    // Never serve stale API data from the browser cache
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+      credentials: "include",
+      // Never serve stale API data from the browser cache
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("The request timed out. Check your connection and try again.");
+    }
+    throw new Error("Could not reach the server. Check your connection and try again.");
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     if (res.status === 401) {
