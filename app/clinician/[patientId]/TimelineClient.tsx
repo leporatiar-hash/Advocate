@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Lora } from "next/font/google";
 import { api } from "../../lib/api";
-import type { TimelineResponse, TimelineWindow } from "../../lib/types";
+import type { TimelineDomain, TimelineResponse, TimelineWindow } from "../../lib/types";
 import { TimelineChart } from "./TimelineChart";
 
 // The "these are the caregiver's actual words" treatment — same role Lora
@@ -30,12 +30,111 @@ function fmtGeneratedAt(iso: string | null): string {
   return `Updated ${d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ── Deterministic observation cards (no LLM) ─────────────────────────────────
+//
+// One card per category, in this priority order, each SKIPPED (not invented)
+// when the domain has nothing to say for it:
+//   1. band crossing   — the most recent day the band changed (band axis only)
+//   2. record high/low — the day of the window's most extreme raw value
+//   3. streak boundary — the start date of the current trailing same-band run
+//      (band axis only — a numeric domain like Weight has no "band" to hold
+//      a streak in, so it only ever produces the record-high/low card).
+interface ObservationCard {
+  date: string;
+  text: string;
+}
+
+function deriveObservationCards(domain: TimelineDomain): ObservationCard[] {
+  const cards: ObservationCard[] = [];
+  const series = domain.series;
+
+  if (domain.axis === "band") {
+    const logged = series.filter((p) => p.band != null);
+    for (let i = logged.length - 1; i > 0; i--) {
+      if (logged[i].band !== logged[i - 1].band) {
+        cards.push({ date: logged[i].date, text: `Crossed from ${cap(logged[i - 1].band!)} to ${cap(logged[i].band!)}` });
+        break;
+      }
+    }
+  }
+
+  const withValue = series.filter((p) => p.value != null) as { date: string; value: number }[];
+  if (withValue.length > 0) {
+    const max = withValue.reduce((a, b) => (b.value > a.value ? b : a));
+    const min = withValue.reduce((a, b) => (b.value < a.value ? b : a));
+    const pick = new Date(max.date) >= new Date(min.date) ? { p: max, label: "high" } : { p: min, label: "low" };
+    if (max.value !== min.value) {
+      cards.push({ date: pick.p.date, text: `Record ${pick.label} of ${pick.p.value}` });
+    }
+  }
+
+  if (domain.axis === "band") {
+    const logged = series.filter((p) => p.band != null);
+    if (logged.length > 0) {
+      const currentBand = logged[logged.length - 1].band!;
+      let idx = logged.length - 1;
+      while (idx > 0 && logged[idx - 1].band === currentBand) idx--;
+      // Only worth a card if it's a genuine boundary (not day one of the window).
+      if (idx > 0) {
+        cards.push({ date: logged[idx].date, text: `${cap(currentBand)} since` });
+      }
+    }
+  }
+
+  return cards.slice(0, 3);
+}
+
+// ── "AI Summary · Notes Synthesis" — shared container styling for both the
+// main compact multi-domain list and the overlay's single-domain notes ──────
+
+function SynthesisCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="relative overflow-hidden"
+      style={{ background: "var(--surface-1)", border: "1px solid var(--accent)", borderRadius: 14 }}
+    >
+      <div
+        aria-hidden="true"
+        className="absolute top-0 left-0"
+        style={{
+          width: 0, height: 0,
+          borderTop: "18px solid var(--med-change-line)",
+          borderRight: "18px solid transparent",
+          opacity: 0.55,
+        }}
+      />
+      <div className="px-5 py-4">{children}</div>
+    </div>
+  );
+}
+
+function SynthesisDisclaimer() {
+  return (
+    <p className="mt-3 pt-3" style={{ fontSize: 11, color: "var(--text-secondary)", borderTop: "1px solid var(--border)" }}>
+      AI-generated synthesis of caregiver notes. Attributed observations only — not a diagnosis.
+    </p>
+  );
+}
+
+function VerbatimNote({ date, author, text }: { date: string; author: string; text: string }) {
+  return (
+    <div className="rounded-lg px-3 py-2.5" style={{ background: "var(--surface-0)" }}>
+      <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>{fmtDate(date)} · {author}</p>
+      <p style={{ fontFamily: "var(--font-voice)", fontSize: 15, lineHeight: 1.5, marginTop: 2 }}>{text}</p>
+    </div>
+  );
+}
+
 export default function TimelineClient({ patientId }: { patientId: number }) {
   const [window_, setWindow] = useState<TimelineWindow>("1m");
   const [data, setData] = useState<TimelineResponse | null>(null);
   const [error, setError] = useState(false);
-  const [expandedCard, setExpandedCard] = useState<string | null>(null);
-  const [expandedNoteDomain, setExpandedNoteDomain] = useState<string | null>(null);
+  const [overlayDomain, setOverlayDomain] = useState<string | null>(null);
+  const [otherNotesOpen, setOtherNotesOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +163,17 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
     return () => clearInterval(id);
   }, [data?.pending, patientId, window_]);
 
+  // Overlay respects the current window: closing/reopening or switching
+  // windows while it's open just re-renders against whatever `data` now is.
+  useEffect(() => {
+    if (!overlayDomain) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOverlayDomain(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overlayDomain]);
+
   const dates = useMemo(() => (data ? data.domains[0]?.series.map((s) => s.date) ?? [] : []), [data]);
 
   if (error) {
@@ -82,7 +192,7 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
     );
   }
 
-  const expandedDomain = data.domains.find((d) => d.key === expandedCard) ?? null;
+  const overlayDomainData = data.domains.find((d) => d.key === overlayDomain) ?? null;
 
   return (
     <div className={`${lora.variable} clinician-timeline px-6 py-8 max-w-[1100px] mx-auto`}>
@@ -140,61 +250,32 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
         })}
       </div>
 
-      {/* Six-card grid */}
+      {/* Domain tile grid */}
       <div
         className="mt-5"
-        style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(196px, 1fr))", gap: 12 }}
+        style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}
       >
         {data.domains.map((d) => (
           <button
             key={d.key}
-            onClick={() => setExpandedCard(expandedCard === d.key ? null : d.key)}
-            className="text-left p-3 border"
-            style={{
-              background: "var(--surface-1)",
-              borderRadius: 12,
-              borderColor: expandedCard === d.key ? "var(--accent)" : "var(--border)",
-              borderWidth: expandedCard === d.key ? 2 : 1,
-              aspectRatio: "1 / 1",
-              display: "flex",
-              flexDirection: "column",
-            }}
+            onClick={() => setOverlayDomain(d.key)}
+            className="text-left border relative"
+            style={{ background: "var(--surface-1)", borderRadius: 14, borderColor: "var(--border)", padding: "16px 18px" }}
           >
             <div className="flex items-center justify-between">
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{d.label}</span>
-              <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{d.caption}</span>
+              <span style={{ fontSize: 16, fontWeight: 600 }}>{d.label}</span>
+              {/* Maximize icon — purely an affordance; the whole tile opens the overlay. */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" aria-hidden="true">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </div>
-            <div className="flex-1 mt-1">
-              <TimelineChart dates={dates} series={d.series} axis={d.axis} events={data.events} expanded={false} />
+            <div style={{ aspectRatio: "300 / 140", marginTop: 8 }}>
+              <TimelineChart dates={dates} series={d.series} axis={d.axis} events={data.events} size="small" />
             </div>
+            <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.caption}</p>
           </button>
         ))}
       </div>
-
-      {/* Expanded detail panel */}
-      {expandedDomain && (
-        <div className="mt-4 p-5" style={{ background: "var(--surface-1)", borderRadius: 12, border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between">
-            <h2 style={{ fontSize: 16, fontWeight: 600 }}>{expandedDomain.label}</h2>
-            <span className="tl-tabular" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              {fmtDate(data.patient.range_start)}–{fmtDate(data.patient.range_end)}
-            </span>
-          </div>
-          <div style={{ height: 280 }} className="mt-3">
-            <TimelineChart
-              dates={dates}
-              series={expandedDomain.series}
-              axis={expandedDomain.axis}
-              events={data.events}
-              expanded
-            />
-          </div>
-          <p className="mt-3" style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text-primary)" }}>
-            {expandedDomain.summary}
-          </p>
-          <p style={{ fontSize: 11, color: "var(--text-secondary)" }}>{fmtGeneratedAt(expandedDomain.summary_generated_at)}</p>
-        </div>
-      )}
 
       {/* Legend */}
       <div className="flex items-center gap-5 mt-4" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
@@ -210,80 +291,143 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
         </span>
       </div>
 
-      {/* Caregiver notes */}
+      {/* Caregiver notes — compact multi-domain synthesis; each row opens
+          the same full-screen overlay the grid tiles do. */}
       <div className="mt-8">
         <h2 style={{ fontSize: 16, fontWeight: 600 }}>Caregiver notes</h2>
-        <p className="mt-1" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          Summaries below are generated. Entries are shown exactly as the caregiver wrote them.
+        <p className="mt-1 mb-3" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          Summaries are generated. Entries are shown exactly as written.
         </p>
 
-        <div className="mt-3 divide-y" style={{ borderColor: "var(--border)" }}>
-          {data.domains.map((d) => {
-            const isOpen = expandedNoteDomain === d.key;
-            return (
-              <div key={d.key} className="py-3">
-                <button
-                  onClick={() => setExpandedNoteDomain(isOpen ? null : d.key)}
-                  aria-expanded={isOpen}
-                  className="w-full flex items-center justify-between text-left gap-4"
-                >
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{d.label}</span>
-                  <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{d.notes.length} entries</span>
-                </button>
-                <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.summary}</p>
-                {isOpen && (
-                  <div className="mt-3 space-y-3">
-                    {d.notes.length === 0 ? (
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>No notes this window.</p>
-                    ) : (
-                      d.notes.map((n) => (
-                        <div key={`${n.date}-${n.author}`} style={{ borderLeft: "2px solid var(--accent)", paddingLeft: 12 }}>
-                          <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                            {fmtDate(n.date)} · {n.author}
-                          </p>
-                          <p style={{ fontFamily: "var(--font-voice)", fontSize: 15, lineHeight: 1.5, marginTop: 2 }}>
-                            {n.text}
-                          </p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Unassigned bucket — always last */}
-          <div className="py-3">
-            <button
-              onClick={() => setExpandedNoteDomain(expandedNoteDomain === "__other__" ? null : "__other__")}
-              aria-expanded={expandedNoteDomain === "__other__"}
-              className="w-full flex items-center justify-between text-left gap-4"
-            >
-              <span style={{ fontSize: 14, fontWeight: 600 }}>Other notes</span>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{data.other_notes.length} entries</span>
-            </button>
-            {expandedNoteDomain === "__other__" && (
-              <div className="mt-3 space-y-3">
-                {data.other_notes.length === 0 ? (
-                  <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Nothing unassigned this window.</p>
-                ) : (
-                  data.other_notes.map((n) => (
-                    <div key={`${n.date}-${n.author}`} style={{ borderLeft: "2px solid var(--text-secondary)", paddingLeft: 12 }}>
-                      <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                        {fmtDate(n.date)} · {n.author}
-                      </p>
-                      <p style={{ fontFamily: "var(--font-voice)", fontSize: 15, lineHeight: 1.5, marginTop: 2 }}>
-                        {n.text}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+        <SynthesisCard>
+          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
+            AI SUMMARY · NOTES SYNTHESIS
+          </p>
+          <div className="mt-2 divide-y" style={{ borderColor: "var(--border)" }}>
+            {data.domains.map((d) => (
+              <button
+                key={d.key}
+                onClick={() => setOverlayDomain(d.key)}
+                className="w-full flex items-start justify-between gap-4 py-3 text-left"
+              >
+                <div className="min-w-0">
+                  <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-secondary)" }}>
+                    {d.label.toUpperCase()}
+                  </p>
+                  <p
+                    className="mt-1"
+                    style={{
+                      fontSize: 13, lineHeight: 1.5, color: "var(--text-primary)",
+                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+                    }}
+                  >
+                    {d.summary}
+                  </p>
+                </div>
+                <span className="flex-shrink-0 whitespace-nowrap" style={{ fontSize: 12, color: "var(--accent)" }}>
+                  {d.notes.length} note{d.notes.length !== 1 ? "s" : ""} ›
+                </span>
+              </button>
+            ))}
           </div>
+          <SynthesisDisclaimer />
+        </SynthesisCard>
+
+        {/* Unassigned bucket — no chart to open an overlay onto, so it stays
+            a simple inline expander. */}
+        <div className="mt-3">
+          <button
+            onClick={() => setOtherNotesOpen((v) => !v)}
+            aria-expanded={otherNotesOpen}
+            className="w-full flex items-center justify-between text-left gap-4"
+          >
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Other notes</span>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{data.other_notes.length} entries</span>
+          </button>
+          {otherNotesOpen && (
+            <div className="mt-3 space-y-2">
+              {data.other_notes.length === 0 ? (
+                <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Nothing unassigned this window.</p>
+              ) : (
+                data.other_notes.map((n) => <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />)
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Full-screen overlay */}
+      {overlayDomainData && (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto clinician-timeline"
+          style={{ background: "var(--surface-0)" }}
+        >
+          <div className="max-w-[1240px] mx-auto px-8 py-8">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 style={{ fontSize: 28, fontWeight: 600 }}>{overlayDomainData.label}</h2>
+                <p className="tl-tabular mt-1" style={{ fontSize: 14, color: "var(--text-secondary)" }}>
+                  {data.patient.name} · {fmtDate(data.patient.range_start)}–{fmtDate(data.patient.range_end)}
+                </p>
+              </div>
+              <button
+                onClick={() => setOverlayDomain(null)}
+                aria-label="Close"
+                className="rounded-full p-2"
+                style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-6" style={{ height: 400 }}>
+              <TimelineChart
+                dates={dates}
+                series={overlayDomainData.series}
+                axis={overlayDomainData.axis}
+                events={data.events}
+                size="large"
+              />
+            </div>
+
+            {/* Deterministic observation cards */}
+            {(() => {
+              const cards = deriveObservationCards(overlayDomainData);
+              if (cards.length === 0) return null;
+              return (
+                <div className="mt-6 grid gap-3" style={{ gridTemplateColumns: `repeat(${cards.length}, 1fr)` }}>
+                  {cards.map((c, i) => (
+                    <div key={i} className="p-3 border" style={{ borderRadius: 10, borderColor: "var(--border)", background: "var(--surface-1)" }}>
+                      <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>{fmtDate(c.date)}</p>
+                      <p className="mt-1" style={{ fontSize: 14, fontWeight: 500 }}>{c.text}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* This domain's notes, in the same synthesis-card container */}
+            <div className="mt-6">
+              <SynthesisCard>
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
+                  AI SUMMARY · {overlayDomainData.label.toUpperCase()}
+                </p>
+                <p className="mt-2" style={{ fontSize: 14, lineHeight: 1.6 }}>{overlayDomainData.summary}</p>
+                {overlayDomainData.notes.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {overlayDomainData.notes.map((n) => (
+                      <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />
+                    ))}
+                  </div>
+                )}
+                <SynthesisDisclaimer />
+              </SynthesisCard>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
