@@ -192,6 +192,13 @@ export function TimelineChart({
   const mediumLabel = pickLabel(bandLabels?.medium ?? "Medium");
   const lowLabel = pickLabel(bandLabels?.low ?? "Low");
 
+  // The bottom axis label sits 12px below the plot's bottom edge, which
+  // overflows the viewBox when bottom padding is small (the small tile's
+  // 6px bottom padding leaves only 6px of that 12px inside the SVG, and an
+  // outermost <svg> clips overflow by default — the label was silently
+  // invisible). Clamp it to stay a couple pixels inside the viewBox.
+  const bottomLabelY = Math.min(cfg.vbH - cfg.pad.bottom + 12, cfg.vbH - 2);
+
   return (
     <svg viewBox={`0 0 ${cfg.vbW} ${cfg.vbH}`} className="w-full h-full" role="img" aria-label="Timeline chart">
       {/* Gaps — large chart only: shade the hole in the record rather than
@@ -324,7 +331,7 @@ export function TimelineChart({
       {axis === "band" && (
         <>
           <text x={cfg.labelX} y={cfg.pad.top - 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{highLabel}</text>
-          <text x={cfg.labelX} y={cfg.vbH - cfg.pad.bottom + 12} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{lowLabel}</text>
+          <text x={cfg.labelX} y={bottomLabelY} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{lowLabel}</text>
           {large && (
             <text x={cfg.labelX} y={cfg.pad.top + plotH / 2 + 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{mediumLabel}</text>
           )}
@@ -333,7 +340,7 @@ export function TimelineChart({
       {axis === "numeric" && (
         <>
           <text x={cfg.labelX} y={cfg.pad.top - 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{Math.round(max)}</text>
-          <text x={cfg.labelX} y={cfg.vbH - cfg.pad.bottom + 12} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{Math.round(min)}</text>
+          <text x={cfg.labelX} y={bottomLabelY} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{Math.round(min)}</text>
         </>
       )}
 
