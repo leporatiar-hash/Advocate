@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Lora } from "next/font/google";
 import { api } from "../../lib/api";
-import type { TimelineDomain, TimelineResponse, TimelineWindow } from "../../lib/types";
-import { TimelineChart } from "./TimelineChart";
+import type { TimelineAxis, TimelineDomain, TimelineExtremePoint, TimelineResponse, TimelineSeriesPoint, TimelineWindow } from "../../lib/types";
+import { TimelineChart, type PointRange } from "./TimelineChart";
 
 // The "these are the caregiver's actual words" treatment — same role Lora
 // italic plays for verbatim quotes elsewhere in the clinician-facing UI.
@@ -32,6 +32,23 @@ function fmtGeneratedAt(iso: string | null): string {
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// A single noisy day isn't a trend — the chart always renders the
+// server-computed weekly average (re-bucketed into a band where applicable),
+// never the raw daily series. Observation cards below still read the daily
+// series directly, since those need day-level precision.
+function weeklyChartData(domain: TimelineDomain): { series: TimelineSeriesPoint[]; dates: string[]; ranges: PointRange[] } {
+  const series = domain.weekly_series.map((w) => ({ date: w.week_start, band: w.band, value: w.value }));
+  const dates = domain.weekly_series.map((w) => w.week_start);
+  const ranges: PointRange[] = domain.weekly_series.map((w) => ({ start: w.week_start, end: w.week_end }));
+  return { series, dates, ranges };
+}
+
+function formatExtreme(p: TimelineExtremePoint, axis: TimelineAxis, bandLabels: Record<string, string> | null): string {
+  if (axis === "numeric" && p.value != null) return `${p.value}`;
+  if (p.band) return bandLabels?.[p.band] ?? cap(p.band);
+  return "—";
 }
 
 // ── Deterministic observation cards (no LLM) ─────────────────────────────────
@@ -135,6 +152,16 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
   const [error, setError] = useState(false);
   const [overlayDomain, setOverlayDomain] = useState<string | null>(null);
   const [otherNotesOpen, setOtherNotesOpen] = useState(false);
+  const [weekFilter, setWeekFilter] = useState<{ start: string; end: string } | null>(null);
+
+  function openOverlay(key: string) {
+    setWeekFilter(null);
+    setOverlayDomain(key);
+  }
+  function closeOverlay() {
+    setWeekFilter(null);
+    setOverlayDomain(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -168,13 +195,11 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
   useEffect(() => {
     if (!overlayDomain) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOverlayDomain(null);
+      if (e.key === "Escape") closeOverlay();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayDomain]);
-
-  const dates = useMemo(() => (data ? data.domains[0]?.series.map((s) => s.date) ?? [] : []), [data]);
 
   if (error) {
     return (
@@ -255,26 +280,37 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
         className="mt-5"
         style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}
       >
-        {data.domains.map((d) => (
-          <button
-            key={d.key}
-            onClick={() => setOverlayDomain(d.key)}
-            className="text-left border relative"
-            style={{ background: "var(--surface-1)", borderRadius: 14, borderColor: "var(--border)", padding: "16px 18px" }}
-          >
-            <div className="flex items-center justify-between">
-              <span style={{ fontSize: 16, fontWeight: 600 }}>{d.label}</span>
-              {/* Maximize icon — purely an affordance; the whole tile opens the overlay. */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" aria-hidden="true">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div style={{ aspectRatio: "300 / 140", marginTop: 8 }}>
-              <TimelineChart dates={dates} series={d.series} axis={d.axis} events={data.events} size="small" />
-            </div>
-            <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.caption}</p>
-          </button>
-        ))}
+        {data.domains.map((d) => {
+          const weekly = weeklyChartData(d);
+          return (
+            <button
+              key={d.key}
+              onClick={() => openOverlay(d.key)}
+              className="text-left border relative"
+              style={{ background: "var(--surface-1)", borderRadius: 14, borderColor: "var(--border)", padding: "16px 18px" }}
+            >
+              <div className="flex items-center justify-between">
+                <span style={{ fontSize: 16, fontWeight: 600 }}>{d.label}</span>
+                {/* Maximize icon — purely an affordance; the whole tile opens the overlay. */}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" aria-hidden="true">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div style={{ aspectRatio: "300 / 140", marginTop: 8 }}>
+                <TimelineChart
+                  dates={weekly.dates}
+                  series={weekly.series}
+                  axis={d.axis}
+                  events={data.events}
+                  size="small"
+                  pointRanges={weekly.ranges}
+                  bandLabels={d.band_labels}
+                />
+              </div>
+              <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.caption}</p>
+            </button>
+          );
+        })}
       </div>
 
       {/* Legend */}
@@ -307,7 +343,7 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
             {data.domains.map((d) => (
               <button
                 key={d.key}
-                onClick={() => setOverlayDomain(d.key)}
+                onClick={() => openOverlay(d.key)}
                 className="w-full flex items-start justify-between gap-4 py-3 text-left"
               >
                 <div className="min-w-0">
@@ -371,7 +407,7 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
                 </p>
               </div>
               <button
-                onClick={() => setOverlayDomain(null)}
+                onClick={closeOverlay}
                 aria-label="Close"
                 className="rounded-full p-2"
                 style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
@@ -382,15 +418,45 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
               </button>
             </div>
 
-            <div className="mt-6" style={{ height: 400 }}>
-              <TimelineChart
-                dates={dates}
-                series={overlayDomainData.series}
-                axis={overlayDomainData.axis}
-                events={data.events}
-                size="large"
-              />
-            </div>
+            {(() => {
+              const weekly = weeklyChartData(overlayDomainData);
+              return (
+                <div className="mt-6" style={{ height: 400 }}>
+                  <TimelineChart
+                    dates={weekly.dates}
+                    series={weekly.series}
+                    axis={overlayDomainData.axis}
+                    events={data.events}
+                    size="large"
+                    pointRanges={weekly.ranges}
+                    bandLabels={overlayDomainData.band_labels}
+                    onPointClick={(i) => setWeekFilter(weekly.ranges[i])}
+                  />
+                </div>
+              );
+            })()}
+
+            {/* Monthly highs & lows */}
+            {overlayDomainData.monthly_extremes.length > 0 && (
+              <div className="mt-6">
+                <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-secondary)" }}>
+                  MONTHLY HIGH / LOW
+                </p>
+                <div className="mt-2 grid gap-3" style={{ gridTemplateColumns: `repeat(${overlayDomainData.monthly_extremes.length}, 1fr)` }}>
+                  {overlayDomainData.monthly_extremes.map((m) => (
+                    <div key={m.month} className="p-3 border" style={{ borderRadius: 10, borderColor: "var(--border)", background: "var(--surface-1)" }}>
+                      <p style={{ fontSize: 13, fontWeight: 600 }}>{m.month}</p>
+                      <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                        High: {formatExtreme(m.high, overlayDomainData.axis, overlayDomainData.band_labels)} ({fmtDate(m.high.date)})
+                      </p>
+                      <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                        Low: {formatExtreme(m.low, overlayDomainData.axis, overlayDomainData.band_labels)} ({fmtDate(m.low.date)})
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Deterministic observation cards */}
             {(() => {
@@ -408,20 +474,51 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
               );
             })()}
 
-            {/* This domain's notes, in the same synthesis-card container */}
+            {/* This domain's notes, in the same synthesis-card container.
+                Clicking a week on the chart above scopes this list to that
+                week; the summary paragraph only makes sense unscoped, so it
+                hides while a week filter is active. */}
             <div className="mt-6">
               <SynthesisCard>
-                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
-                  AI SUMMARY · {overlayDomainData.label.toUpperCase()}
-                </p>
-                <p className="mt-2" style={{ fontSize: 14, lineHeight: 1.6 }}>{overlayDomainData.summary}</p>
-                {overlayDomainData.notes.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {overlayDomainData.notes.map((n) => (
-                      <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />
-                    ))}
-                  </div>
+                <div className="flex items-center justify-between gap-4">
+                  <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
+                    AI SUMMARY · {overlayDomainData.label.toUpperCase()}
+                  </p>
+                  {weekFilter && (
+                    <button
+                      onClick={() => setWeekFilter(null)}
+                      style={{ fontSize: 12, color: "var(--accent)", whiteSpace: "nowrap" }}
+                    >
+                      Clear week filter ×
+                    </button>
+                  )}
+                </div>
+                {weekFilter ? (
+                  <p className="mt-2" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                    Showing notes for the week of {fmtDate(weekFilter.start)}–{fmtDate(weekFilter.end)}.
+                  </p>
+                ) : (
+                  <p className="mt-2" style={{ fontSize: 14, lineHeight: 1.6 }}>{overlayDomainData.summary}</p>
                 )}
+                {(() => {
+                  const visibleNotes = weekFilter
+                    ? overlayDomainData.notes.filter((n) => n.date >= weekFilter.start && n.date <= weekFilter.end)
+                    : overlayDomainData.notes;
+                  if (visibleNotes.length === 0) {
+                    return (
+                      <p className="mt-3" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+                        {weekFilter ? "No notes logged that week." : "No caregiver notes on record."}
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="mt-3 space-y-2">
+                      {visibleNotes.map((n) => (
+                        <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />
+                      ))}
+                    </div>
+                  );
+                })()}
                 <SynthesisDisclaimer />
               </SynthesisCard>
             </div>

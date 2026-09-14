@@ -557,12 +557,39 @@ export interface TimelineNote {
   text: string;
 }
 
+export interface TimelineWeeklyPoint {
+  week_start: string;
+  week_end: string;
+  band: TimelineBand | null;
+  value: number | null;
+  days_logged: number;
+  days_in_week: number;
+}
+
+export interface TimelineExtremePoint {
+  date: string;
+  value: number | null;
+  band: TimelineBand | null;
+}
+
+export interface TimelineMonthlyExtreme {
+  month: string;
+  high: TimelineExtremePoint;
+  low: TimelineExtremePoint;
+}
+
 export interface TimelineDomain {
   key: string;
   label: string;
   axis: TimelineAxis;
   caption: string;
   series: TimelineSeriesPoint[];
+  weekly_series: TimelineWeeklyPoint[];
+  monthly_extremes: TimelineMonthlyExtreme[];
+  /** Domain-specific wording for band levels (e.g. "Full adherence" instead
+   * of a bare "High") — null for the numeric (Weight) domain, which has no
+   * bands to label. */
+  band_labels: Record<string, string> | null;
   summary: string | null;
   summary_generated_at: string | null;
   notes: TimelineNote[];

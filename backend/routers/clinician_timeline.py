@@ -19,10 +19,14 @@ from database import get_db
 import models
 from auth import get_current_clinician
 from services.aggregation import (
+    BAND_LABELS,
+    THRESHOLDS_BY_KEY,
     TIMELINE_DOMAIN_DEFS,
     TIMELINE_WINDOWS,
+    build_monthly_extremes,
     build_timeline_domains,
     build_timeline_events,
+    build_weekly_series,
     rank_timeline_domains,
 )
 from services.timeline_ai import get_latest_log_date
@@ -176,6 +180,9 @@ def get_clinician_timeline(
             "axis": axis,
             "caption": _numeric_caption(entries) if axis == "numeric" else _band_caption(entries),
             "series": series,
+            "weekly_series": build_weekly_series(entries, axis, THRESHOLDS_BY_KEY.get(key)),
+            "monthly_extremes": build_monthly_extremes(entries, axis),
+            "band_labels": BAND_LABELS.get(key),
             "summary": cached.get("summary"),
             "summary_generated_at": cached.get("generated_at"),
             "notes": domain_notes,

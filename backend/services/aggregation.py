@@ -1216,6 +1216,34 @@ TIMELINE_DOMAIN_DEFS = [
     {"key": "weight", "label": "Weight", "axis": "numeric"},
 ]
 
+# Domain-specific wording for what would otherwise be a bare "High/Medium/Low"
+# axis label — requested so a clinician reads "Full adherence" rather than a
+# value judgement-free "High" that says nothing about what's high. Anxiety and
+# Socialization keep the generic severity words; there's no more specific
+# vocabulary that reads better than plain High/Medium/Low for either yet.
+# Sleep is intentionally NOT labeled "Consistent/Irregular" despite that being
+# floated — the band is bucketed on hours slept (SLEEP_BAND_THRESHOLDS), not
+# on schedule regularity, and a "Consistent" label on a duration metric would
+# be a fabricated claim the underlying data doesn't support.
+BAND_LABELS = {
+    "anxiety": {"high": "High", "medium": "Medium", "low": "Low"},
+    "sleep": {"high": "Long sleep", "medium": "Typical sleep", "low": "Short sleep"},
+    "socialization": {"high": "High", "medium": "Medium", "low": "Low"},
+    "cigarettes": {"high": "Heavy usage", "medium": "Moderate usage", "low": "Light usage", "none": "No cigarettes"},
+    "medication": {"high": "Full adherence", "medium": "Partial adherence", "low": "Missed doses"},
+}
+
+# Which threshold table re-buckets a domain's WEEKLY-averaged raw value back
+# into a band. Socialization is deliberately absent — it has no raw number
+# (see _socialization_band), so its weekly band comes from the most common
+# daily band instead (see build_weekly_series).
+THRESHOLDS_BY_KEY = {
+    "anxiety": BAND_THRESHOLDS,
+    "sleep": SLEEP_BAND_THRESHOLDS,
+    "cigarettes": CIGARETTE_THRESHOLDS,
+    "medication": MEDICATION_BAND_THRESHOLDS,
+}
+
 
 def _threshold_band(value: Optional[float], thresholds: dict) -> Optional[str]:
     if value is None:
@@ -1224,6 +1252,109 @@ def _threshold_band(value: Optional[float], thresholds: dict) -> Optional[str]:
         if lo <= value <= hi:
             return band
     return None
+
+
+def build_weekly_series(entries: list, axis: str, thresholds: Optional[dict]) -> list:
+    """Collapse daily (date, raw_value, band) entries into one point per ISO
+    calendar week (Monday-Sunday) — a single noisy day isn't a trend, and a
+    week is the smallest unit clinicians asked to read a trend line from.
+
+    A week's raw value is the mean of that week's LOGGED raw values, then
+    re-bucketed through the same thresholds used daily — never averaging
+    already-bucketed bands, and never letting one outlier day's band stand in
+    for the week. Socialization has no raw value to average (thresholds is
+    None), so its weekly band is the most common daily band that week,
+    alphabetical tie-break for determinism. A week with zero logged days is a
+    genuine gap (value and band both None), same convention as daily data.
+    """
+    weeks: dict = {}
+    order = []
+    for row in entries:
+        d = row[0]
+        key = d.isocalendar()[:2]
+        if key not in weeks:
+            weeks[key] = []
+            order.append(key)
+        weeks[key].append(row)
+
+    result = []
+    for key in order:
+        rows = weeks[key]
+        week_start = min(r[0] for r in rows).isoformat()
+        week_end = max(r[0] for r in rows).isoformat()
+        days_in_week = len(rows)
+
+        if axis == "numeric" or thresholds is not None:
+            values = [r[1] for r in rows if r[1] is not None]
+            avg = round(sum(values) / len(values), 2) if values else None
+            band = _threshold_band(avg, thresholds) if (thresholds is not None and avg is not None) else None
+            result.append({
+                "week_start": week_start, "week_end": week_end,
+                "value": avg, "band": band,
+                "days_logged": len(values), "days_in_week": days_in_week,
+            })
+        else:
+            bands = [r[2] for r in rows if r[2] is not None]
+            band = None
+            if bands:
+                counts: dict = {}
+                for b in bands:
+                    counts[b] = counts.get(b, 0) + 1
+                top = max(counts.values())
+                band = sorted(b for b, c in counts.items() if c == top)[0]
+            result.append({
+                "week_start": week_start, "week_end": week_end,
+                "value": None, "band": band,
+                "days_logged": len(bands), "days_in_week": days_in_week,
+            })
+    return result
+
+
+_BAND_RANK = {"none": 0, "low": 1, "medium": 2, "high": 3}
+
+
+def build_monthly_extremes(entries: list, axis: str) -> list:
+    """Per calendar month touched by the window: the actual highest and
+    lowest LOGGED daily reading — the real day, never a smoothed average, so
+    "highest this month" always names a date a clinician could ask about.
+    Socialization has no raw number, so its extremes rank by band ordinal
+    instead (value stays null on those points) so every domain still gets a
+    comparable row. A month with nothing logged for this domain is omitted,
+    never a fabricated hi/lo.
+    """
+    months: dict = {}
+    order = []
+    for row in entries:
+        d = row[0]
+        key = (d.year, d.month)
+        if key not in months:
+            months[key] = []
+            order.append(key)
+        months[key].append(row)
+
+    def to_point(row):
+        d, value, band = row
+        return {"date": d.isoformat(), "value": value, "band": band}
+
+    result = []
+    for key in order:
+        rows = months[key]
+        label = date_type(key[0], key[1], 1).strftime("%b %Y")
+        by_value = axis == "numeric" or any(r[1] is not None for r in rows)
+        if by_value:
+            logged = [r for r in rows if r[1] is not None]
+            if not logged:
+                continue
+            hi = max(logged, key=lambda r: r[1])
+            lo = min(logged, key=lambda r: r[1])
+        else:
+            logged = [r for r in rows if r[2] is not None]
+            if not logged:
+                continue
+            hi = max(logged, key=lambda r: _BAND_RANK.get(r[2], -1))
+            lo = min(logged, key=lambda r: _BAND_RANK.get(r[2], -1))
+        result.append({"month": label, "high": to_point(hi), "low": to_point(lo)})
+    return result
 
 
 def _anxiety_value(log) -> Optional[float]:

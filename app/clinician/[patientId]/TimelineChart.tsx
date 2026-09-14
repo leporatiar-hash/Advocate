@@ -117,6 +117,24 @@ function fmtShort(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+export interface PointRange {
+  start: string;
+  end: string;
+}
+
+/** Resolves an event's date to a point index. With `ranges` (weekly-bucketed
+ * charts, where each point spans several days) it finds whichever range
+ * contains the date; without it (daily charts) it falls back to an exact
+ * match against `dates`. */
+function indexForDate(dateStr: string, dates: string[], ranges?: PointRange[]): number | null {
+  if (ranges) {
+    const idx = ranges.findIndex((r) => dateStr >= r.start && dateStr <= r.end);
+    return idx === -1 ? null : idx;
+  }
+  const idx = dates.indexOf(dateStr);
+  return idx === -1 ? null : idx;
+}
+
 export function TimelineChart({
   dates,
   series,
@@ -125,6 +143,9 @@ export function TimelineChart({
   size,
   numericMin,
   numericMax,
+  pointRanges,
+  bandLabels,
+  onPointClick,
 }: {
   dates: string[];
   series: TimelineSeriesPoint[];
@@ -133,6 +154,17 @@ export function TimelineChart({
   size: ChartSize;
   numericMin?: number;
   numericMax?: number;
+  /** One entry per series point, when each point represents a span of days
+   * (e.g. a calendar week) rather than a single day — used to place episode
+   * and med-change markers, and to hit-test clicks. */
+  pointRanges?: PointRange[];
+  /** Domain-specific wording for the band axis labels (e.g. "Full adherence"
+   * instead of "High"). Falls back to plain High/Medium/Low when absent. */
+  bandLabels?: Record<string, string> | null;
+  /** Called with a point's index when the clinician clicks that point/span —
+   * only wired up on the large overlay chart, to drill into that week's
+   * notes. Small tiles stay whole-tile-clickable. */
+  onPointClick?: (index: number) => void;
 }) {
   const cfg = SIZE_CONFIG[size];
   const large = size === "large";
@@ -147,9 +179,18 @@ export function TimelineChart({
   const gaps = buildGaps(series, axis);
   const count = series.length;
 
-  const dateIndex = new Map(dates.map((d, i) => [d, i]));
   const episodes = events.filter((e): e is Extract<TimelineEventItem, { type: "episode" }> => e.type === "episode");
   const medChanges = events.filter((e): e is Extract<TimelineEventItem, { type: "med_change" }> => e.type === "med_change");
+
+  // The small tile has ~36px of margin to fit a label in at 9px font — a
+  // domain-specific phrase like "Heavy usage" would run into the chart
+  // itself, so the tile gets just its first word; the large overlay has
+  // room for the full phrase.
+  const firstWord = (s: string) => s.split(" ")[0];
+  const pickLabel = (full: string) => (large ? full : firstWord(full));
+  const highLabel = pickLabel(bandLabels?.high ?? "High");
+  const mediumLabel = pickLabel(bandLabels?.medium ?? "Medium");
+  const lowLabel = pickLabel(bandLabels?.low ?? "Low");
 
   return (
     <svg viewBox={`0 0 ${cfg.vbW} ${cfg.vbH}`} className="w-full h-full" role="img" aria-label="Timeline chart">
@@ -193,8 +234,8 @@ export function TimelineChart({
       {/* Episode band(s) — filled vertical band behind the line, with an
           inline dated label above it on the large chart. */}
       {episodes.map((ep, i) => {
-        const startIdx = dateIndex.get(ep.start) ?? (ep.start < dates[0] ? 0 : null);
-        const endIdx = dateIndex.get(ep.end) ?? (ep.end > dates[dates.length - 1] ? dates.length - 1 : null);
+        const startIdx = indexForDate(ep.start, dates, pointRanges) ?? (ep.start < dates[0] ? 0 : null);
+        const endIdx = indexForDate(ep.end, dates, pointRanges) ?? (ep.end > dates[dates.length - 1] ? dates.length - 1 : null);
         if (startIdx == null || endIdx == null) return null;
         const x1 = xFor(startIdx, count, cfg, plotW);
         const x2 = xFor(endIdx, count, cfg, plotW);
@@ -227,7 +268,7 @@ export function TimelineChart({
       {/* Med-change marker(s) — dashed vertical line, with a dated label
           below the chart on the large chart. */}
       {medChanges.map((ev, i) => {
-        const idx = dateIndex.get(ev.date);
+        const idx = indexForDate(ev.date, dates, pointRanges);
         if (idx == null) return null;
         const x = xFor(idx, count, cfg, plotW);
         return (
@@ -279,13 +320,13 @@ export function TimelineChart({
         ) : null
       )}
 
-      {/* Band labels — three on the large chart, two (High/Low) on the small tile */}
+      {/* Band labels — three on the large chart, two (top/bottom) on the small tile */}
       {axis === "band" && (
         <>
-          <text x={cfg.labelX} y={cfg.pad.top - 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">High</text>
-          <text x={cfg.labelX} y={cfg.vbH - cfg.pad.bottom + 12} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">Low</text>
+          <text x={cfg.labelX} y={cfg.pad.top - 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{highLabel}</text>
+          <text x={cfg.labelX} y={cfg.vbH - cfg.pad.bottom + 12} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{lowLabel}</text>
           {large && (
-            <text x={cfg.labelX} y={cfg.pad.top + plotH / 2 + 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">Medium</text>
+            <text x={cfg.labelX} y={cfg.pad.top + plotH / 2 + 4} fontSize={cfg.labelFontSize} fill="var(--text-secondary)">{mediumLabel}</text>
           )}
         </>
       )}
@@ -296,13 +337,43 @@ export function TimelineChart({
         </>
       )}
 
-      {/* Date bounds at the bottom corners — large chart only */}
+      {/* Date bounds at the bottom corners — large chart only. With
+          pointRanges (weekly buckets), the right edge is the true end of the
+          last week/window, not just that bucket's start date. */}
       {large && dates.length > 0 && (
         <>
-          <text x={cfg.pad.left} y={cfg.vbH - 16} fontSize={13} fill="var(--text-secondary)">{fmtShort(dates[0])}</text>
-          <text x={cfg.vbW - cfg.pad.right} y={cfg.vbH - 16} fontSize={13} textAnchor="end" fill="var(--text-secondary)">
-            {fmtShort(dates[dates.length - 1])}
+          <text x={cfg.pad.left} y={cfg.vbH - 16} fontSize={13} fill="var(--text-secondary)">
+            {fmtShort(pointRanges ? pointRanges[0].start : dates[0])}
           </text>
+          <text x={cfg.vbW - cfg.pad.right} y={cfg.vbH - 16} fontSize={13} textAnchor="end" fill="var(--text-secondary)">
+            {fmtShort(pointRanges ? pointRanges[pointRanges.length - 1].end : dates[dates.length - 1])}
+          </text>
+        </>
+      )}
+
+      {/* Click targets for week drill-down — large chart only (see
+          onPointClick doc above); one invisible rect per point, sized to its
+          share of the plot width. */}
+      {large && onPointClick && (
+        <>
+          {series.map((_, i) => {
+            const x = xFor(i, count, cfg, plotW);
+            const halfStep = count > 1 ? plotW / (count - 1) / 2 : plotW / 2;
+            return (
+              <rect
+                key={`hit-${i}`}
+                x={x - halfStep}
+                y={cfg.pad.top}
+                width={halfStep * 2}
+                height={plotH}
+                fill="transparent"
+                style={{ cursor: "pointer" }}
+                onClick={() => onPointClick(i)}
+              >
+                <title>{pointRanges ? `Week of ${fmtShort(pointRanges[i].start)}` : fmtShort(dates[i])}</title>
+              </rect>
+            );
+          })}
         </>
       )}
     </svg>
