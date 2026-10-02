@@ -233,13 +233,16 @@ DOMAIN_SUMMARY_SYSTEM_PROMPT = (
     "input. Never \"the patient,\" \"the individual,\" or \"he\"/\"she\"/\"they\" "
     "as the primary reference — use the name.\n\n"
     "HARD RULES:\n"
-    "1. Three sentences maximum.\n"
+    "1. Three or four short sentences, 90 words maximum. Cover the turning "
+    "points (when the level moved, and what caregivers saw around then), "
+    "not every note.\n"
     "2. Only reference dates and values supplied in the input, and restate "
     "them exactly as given. Never introduce a number, and never compute one "
     "(e.g. a day-count since some date) yourself, even if it seems obvious — "
     "if it is not itself a fact in the input, leave it out.\n"
     "3. NO CAUSAL LANGUAGE: caused, led to, triggered, because, due to, "
-    "resulted in, brought on, made him/her/them, drove.\n"
+    "resulted in, resulting in, as a result, brought on, made him/her/them, "
+    "drove. Put two events side by side with their dates; never link them.\n"
     "4. NO DIAGNOSTIC LANGUAGE: diagnose, predict, detect, indicates, "
     "suggests, consistent with, symptoms of, risk of, likely to, paranoia, "
     "paranoid, psychosis, psychotic, manic, mania, hypomanic, delusion, "
@@ -251,6 +254,15 @@ DOMAIN_SUMMARY_SYSTEM_PROMPT = (
     "between named levels — say which levels, not whether that is good.\n"
     "6. Never infer intent, mood, or internal state that was not logged.\n"
     "7. If the data does not support a sentence, write less.\n\n"
+    "WHAT TO WRITE: Build the summary mainly from `notes` — what the "
+    "caregivers actually observed, in date order, in their own plain terms. "
+    "Use `level_runs` (consecutive stretches at one level, with start and "
+    "end dates) to anchor the notes to when the level moved, e.g. \"moved "
+    "from low to high between Aug 13 and Aug 24\". If `level_runs` has more "
+    "than one entry, never say the domain \"remained\" or \"stayed\" at a "
+    "level for the whole window. If `level_meanings` is given, describe "
+    "levels in those words instead of low/medium/high. Write dates as "
+    "\"Aug 13\", never ISO.\n\n"
     "Return ONLY valid JSON: {\"summary\": \"...\"} — no markdown fences, no "
     "extra text."
 )
@@ -275,7 +287,10 @@ def _client(api_key: str) -> OpenAI:
 
 
 def _model() -> str:
-    return os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    # gpt-4.1 rather than -mini: the domain summaries are read by a
+    # psychiatrist, and -mini routinely misordered or merged events across
+    # a 2-month window. Demo patients only, so the cost is bounded.
+    return os.getenv("TIMELINE_OPENAI_MODEL", "gpt-4.1")
 
 
 def generate_headline(facts: dict, api_key: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
@@ -311,15 +326,30 @@ def fallback_headline(facts: dict) -> str:
     )
 
 
-def generate_domain_summary(facts: dict, api_key: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
+def generate_domain_summary(facts: dict, api_key: str, timeout: float = DEFAULT_TIMEOUT_SECONDS, rejected: Optional[tuple] = None) -> str:
+    """`rejected` is (previous_summary, offending_text) from a failed
+    validate_ai_text pass — sent back so the retry can fix exactly that.
+    The retry's output goes through the same validator; this never bypasses it."""
+    messages = [
+        {"role": "system", "content": DOMAIN_SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(facts, indent=2)},
+    ]
+    if rejected:
+        prev, offending = rejected
+        messages += [
+            {"role": "assistant", "content": json.dumps({"summary": prev})},
+            {"role": "user", "content": (
+                f"Rejected: it contains \"{offending}\", which breaks the hard rules "
+                "(causal/diagnostic/evaluative language, or a date or number not in the "
+                "input). Rewrite it without that, keeping the same content otherwise. "
+                "State events side by side in sequence instead of linking them."
+            )},
+        ]
     completion = _client(api_key).chat.completions.create(
         model=_model(),
         response_format={"type": "json_object"},
         timeout=timeout,
-        messages=[
-            {"role": "system", "content": DOMAIN_SUMMARY_SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(facts, indent=2)},
-        ],
+        messages=messages,
     )
     raw = (completion.choices[0].message.content or "").strip()
     summary = (json.loads(raw).get("summary") or "").strip()
@@ -410,6 +440,32 @@ def _band_or_value(axis: str, entry: Optional[tuple]):
     return band if axis == "band" else value
 
 
+# Plain-language meaning of each socialization level — it has no underlying
+# number (see aggregation._socialization_band), so "low/medium/high" alone
+# says nothing to a reader.
+SOCIALIZATION_LEVEL_MEANINGS = {
+    "low": "stayed home",
+    "medium": "left the house",
+    "high": "had a good social contact",
+}
+
+
+def _level_runs(logged_entries: list, axis: str) -> list:
+    """Consecutive stretches of logged days at the same level, as
+    [{"level", "from", "to"}] — the shape of the window, not just its two
+    endpoints. Unlogged days are skipped rather than ending a run (a gap is
+    silence, not a change). Numeric domains (weight) list each reading."""
+    if axis == "numeric":
+        return [{"value": v, "date": d.isoformat()} for (d, v, _) in logged_entries]
+    runs: list = []
+    for (d, _, band) in logged_entries:
+        if runs and runs[-1]["level"] == band:
+            runs[-1]["to"] = d.isoformat()
+        else:
+            runs.append({"level": band, "from": d.isoformat(), "to": d.isoformat()})
+    return runs
+
+
 def _generate_window_content(db, patient_id: int, patient_first_name: str, window_days: int, end: date_type, assignments: dict, api_key) -> dict:
     """Headline + one summary per domain, scoped to exactly this window — see
     regenerate_timeline_cache's module note on why this runs once per window
@@ -477,14 +533,22 @@ def _generate_window_content(db, patient_id: int, patient_first_name: str, windo
             "days_in_range": real_days_in_range,
             "start_value": _band_or_value(axis, logged_entries[0] if logged_entries else None),
             "end_value": _band_or_value(axis, logged_entries[-1] if logged_entries else None),
+            "level_runs": _level_runs(logged_entries, axis),
+            "events_in_window": events_in_window,
             "note_count": len(domain_notes),
-            "notes": [{"date": n["date"], "text": n["text"]} for n in domain_notes],
+            "notes": [{"date": n["date"], "author": n["author"], "text": n["text"]} for n in domain_notes],
         }
+        if key == "socialization":
+            facts["level_meanings"] = SOCIALIZATION_LEVEL_MEANINGS
         summary = None
         if api_key:
             try:
                 candidate = generate_domain_summary(facts, api_key)
-                summary = None if validate_ai_text(candidate, facts) else candidate
+                problem = validate_ai_text(candidate, facts)
+                if problem:
+                    candidate = generate_domain_summary(facts, api_key, rejected=(candidate, problem))
+                    problem = validate_ai_text(candidate, facts)
+                summary = None if problem else candidate
             except Exception:
                 summary = None
         if not summary:

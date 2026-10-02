@@ -133,6 +133,16 @@ interface RowModel {
   weekAgo: number | null;
   extreme: { value: number; date: string } | null;
   currentInZone: boolean;
+  /** Socialization only: days he left the house in the last 7 days, and the 7 before that. */
+  leftHouse: { days: number; prevDays: number } | null;
+}
+
+/** Days in the 7-day span ending at `endIdx` that he left the house
+ * (level >= 2). Unlogged days don't count as leaving. */
+function leftHouseDays(raw: (number | null)[], endIdx: number): number {
+  let n = 0;
+  for (let i = Math.max(0, endIdx - 6); i <= endIdx; i++) if ((raw[i] ?? 0) >= 2) n++;
+  return n;
 }
 
 function buildRow(domain: TimelineDomain): RowModel {
@@ -169,14 +179,21 @@ function buildRow(domain: TimelineDomain): RowModel {
   const z = spec.concern;
   const currentInZone = !!(current && z && current.value >= z.from && current.value <= z.to);
 
-  return { domain, view, spec, raw, line, current, weekAgo, extreme, currentInZone };
+  const leftHouse = domain.key === "socialization" && curIdx >= 0
+    ? { days: leftHouseDays(raw, curIdx), prevDays: leftHouseDays(raw, curIdx - 7) }
+    : null;
+  const socialInZone = leftHouse ? leftHouse.days <= 2 : currentInZone;
+
+  return { domain, view, spec, raw, line, current, weekAgo, extreme, currentInZone: socialInZone, leftHouse };
 }
 
 function deltaText(row: RowModel): string | null {
   const { current, weekAgo, view } = row;
   if (!current || weekAgo == null) return null;
-  if (row.domain.key === "socialization") {
-    return current.value === weekAgo ? "Same as a week ago" : `${view.fmtValue(weekAgo)} a week ago`;
+  if (row.leftHouse) {
+    const { days, prevDays } = row.leftHouse;
+    if (days === prevDays) return `Left house · same as week before`;
+    return `Left house · ${days > prevDays ? "▲" : "▼"} from ${prevDays} week before`;
   }
   const diff = current.value - weekAgo;
   if (Math.abs(diff) < 0.01) return "Same as a week ago";
@@ -194,8 +211,13 @@ function CurrentValue({ row, big }: { row: RowModel; big?: boolean }) {
   const { current, view, domain, currentInZone } = row;
   const color = currentInZone ? ALERT : "var(--text-primary)";
   if (!current) return <span style={{ fontSize: big ? 32 : 22, color: "var(--text-secondary)" }}>—</span>;
-  if (domain.key === "socialization") {
-    return <span style={{ fontSize: big ? 26 : 18, fontWeight: 650, color }}>{view.fmtValue(current.value)}</span>;
+  if (row.leftHouse) {
+    return (
+      <span className="tl-tabular" style={{ color }}>
+        <span style={{ fontSize: big ? 36 : 26, fontWeight: 650, letterSpacing: "-0.02em" }}>{row.leftHouse.days}</span>
+        <span style={{ fontSize: big ? 16 : 13, fontWeight: 500, marginLeft: 2, color: "var(--text-secondary)" }}>/7 days</span>
+      </span>
+    );
   }
   return (
     <span className="tl-tabular" style={{ color }}>
@@ -691,6 +713,36 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
                 </div>
               );
             })()}
+
+            {/* AI summary of this domain's notes, with the notes themselves */}
+            <div className="mt-6 overflow-hidden" style={{ background: "var(--surface-1)", border: "1px solid var(--accent)", borderRadius: 14 }}>
+              <div className="px-5 py-4">
+                <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
+                  AI SUMMARY · {overlayRow.domain.label.toUpperCase()} NOTES
+                </p>
+                <p className="mt-2" style={{ fontSize: 15, lineHeight: 1.65 }}>
+                  {overlayRow.domain.summary ? prettyDates(overlayRow.domain.summary) : "Summary is generating…"}
+                </p>
+                <p className="mt-3 pt-3" style={{ fontSize: 11, color: "var(--text-secondary)", borderTop: "1px solid var(--border)" }}>
+                  AI-generated from caregiver notes. Attributed observations only — not a diagnosis.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4">
+              <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-secondary)" }}>
+                {overlayRow.domain.notes.length} NOTE{overlayRow.domain.notes.length !== 1 ? "S" : ""} ABOUT {overlayRow.domain.label.toUpperCase()}
+              </p>
+              <div className="mt-2 space-y-2">
+                {overlayRow.domain.notes.length === 0 ? (
+                  <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>No caregiver notes on record.</p>
+                ) : (
+                  [...overlayRow.domain.notes]
+                    .sort((a, b) => (a.date < b.date ? 1 : -1))
+                    .map((n) => <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />)
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
       )}
