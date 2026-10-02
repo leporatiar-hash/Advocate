@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Lora } from "next/font/google";
 import { api } from "../../lib/api";
-import type { TimelineAxis, TimelineDomain, TimelineExtremePoint, TimelineResponse, TimelineSeriesPoint, TimelineWindow } from "../../lib/types";
-import { TimelineChart, type PointRange } from "./TimelineChart";
+import type { TimelineDomain, TimelineEventItem, TimelineExtremePoint, TimelineNote, TimelineResponse, TimelineWindow } from "../../lib/types";
+import { TREND_CFG, TrendAxis, TrendChart, type TrendSpec } from "./TrendChart";
 
 // The "these are the caregiver's actual words" treatment — same role Lora
 // italic plays for verbatim quotes elsewhere in the clinician-facing UI.
@@ -19,9 +19,22 @@ const WINDOW_LABELS: { key: TimelineWindow; label: string }[] = [
   { key: "12m", label: "12M" },
 ];
 
+const ALERT = "#C2410C";
+
+const AUTHOR_COLOR: Record<string, string> = {
+  mom: "#0F6B66",
+  dad: "#4F46E5",
+  brother: "#B45309",
+};
+
 function fmtDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtWeekday(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 function fmtGeneratedAt(iso: string | null): string {
@@ -34,21 +47,162 @@ function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// A single noisy day isn't a trend — the chart always renders the
-// server-computed weekly average (re-bucketed into a band where applicable),
-// never the raw daily series. Observation cards below still read the daily
-// series directly, since those need day-level precision.
-function weeklyChartData(domain: TimelineDomain): { series: TimelineSeriesPoint[]; dates: string[]; ranges: PointRange[] } {
-  const series = domain.weekly_series.map((w) => ({ date: w.week_start, band: w.band, value: w.value }));
-  const dates = domain.weekly_series.map((w) => w.week_start);
-  const ranges: PointRange[] = domain.weekly_series.map((w) => ({ start: w.week_start, end: w.week_end }));
-  return { series, dates, ranges };
+/** Real value with its unit where one exists (e.g. "9/10", "1h", "0%");
+ * socialization has no number, so it falls back to its level word. */
+function formatExtreme(p: TimelineExtremePoint, key: string): string {
+  const view = DOMAIN_VIEW[key];
+  if (p.value != null && view) {
+    const unit = view.unit === "lb" ? " lb" : view.unit;
+    return `${view.fmtValue(p.value)}${unit}`;
+  }
+  if (p.band) return key === "socialization" ? SOCIAL_WORDS[SOCIAL_LEVEL[p.band]] ?? cap(p.band) : cap(p.band);
+  return "—";
 }
 
-function formatExtreme(p: TimelineExtremePoint, axis: TimelineAxis, bandLabels: Record<string, string> | null): string {
-  if (axis === "numeric" && p.value != null) return `${p.value}`;
-  if (p.band) return bandLabels?.[p.band] ?? cap(p.band);
-  return "—";
+/** The AI headline quotes dates as ISO strings; render them like every other
+ * date on the page. */
+function prettyDates(text: string): string {
+  return text.replace(/\b(\d{4}-\d{2}-\d{2})\b/g, (iso) => fmtDate(iso));
+}
+
+// ── Per-domain chart model ───────────────────────────────────────────────────
+//
+// Charts plot the DAILY logged value on a fixed, domain-specific scale (so a
+// 9/10 anxiety day always sits in the same place), with a lightly smoothed
+// trend line on top and a shaded watch zone. Socialization has no raw number,
+// so its three bands plot as 1/2/3.
+
+const SOCIAL_LEVEL: Record<string, number> = { low: 1, medium: 2, high: 3 };
+const SOCIAL_WORDS: Record<number, string> = { 1: "Stayed home", 2: "Went out", 3: "Social contact" };
+
+interface DomainView {
+  spec: TrendSpec;
+  /** Which direction is the concerning one — drives the "peak" callout. */
+  worse: "up" | "down" | null;
+  unit: string;
+  fmtValue: (v: number) => string;
+  smooth: "weighted" | "none" | "interpolate";
+}
+
+const DOMAIN_VIEW: Record<string, DomainView> = {
+  anxiety: { spec: { min: 0, max: 10, concern: { from: 7, to: 10 }, fmt: (v) => `${v}` }, worse: "up", unit: "/10", fmtValue: (v) => `${Math.round(v)}`, smooth: "weighted" },
+  sleep: { spec: { min: 0, max: 14, concern: { from: 0, to: 5 }, fmt: (v) => `${v}h` }, worse: "down", unit: "h", fmtValue: (v) => v.toFixed(1).replace(/\.0$/, ""), smooth: "weighted" },
+  cigarettes: { spec: { min: 0, max: 18, concern: { from: 11, to: 18 }, fmt: (v) => `${v}` }, worse: "up", unit: "/day", fmtValue: (v) => `${Math.round(v)}`, smooth: "weighted" },
+  medication: { spec: { min: 0, max: 100, concern: { from: 0, to: 50 }, fmt: (v) => `${v}%` }, worse: "down", unit: "%", fmtValue: (v) => `${Math.round(v)}`, smooth: "none" },
+  socialization: { spec: { min: 0.6, max: 3.4, concern: { from: 0.6, to: 1.4 }, fmt: (v) => SOCIAL_WORDS[v] ?? "" }, worse: "down", unit: "", fmtValue: (v) => SOCIAL_WORDS[Math.round(v)] ?? "—", smooth: "weighted" },
+  weight: { spec: { min: 0, max: 1, fmt: (v) => `${Math.round(v)} lb` }, worse: "up", unit: "lb", fmtValue: (v) => `${Math.round(v)}`, smooth: "interpolate" },
+};
+
+function rawValues(domain: TimelineDomain): (number | null)[] {
+  if (domain.key === "socialization") return domain.series.map((p) => (p.band ? SOCIAL_LEVEL[p.band] ?? null : null));
+  return domain.series.map((p) => p.value);
+}
+
+function trendLine(raw: (number | null)[], mode: DomainView["smooth"]): (number | null)[] {
+  if (mode === "none") return raw;
+  if (mode === "interpolate") {
+    const known = raw.map((v, i) => (v == null ? null : i)).filter((i): i is number => i != null);
+    return raw.map((v, i) => {
+      if (v != null) return v;
+      const prev = [...known].reverse().find((k) => k < i);
+      const next = known.find((k) => k > i);
+      if (prev == null || next == null) return null;
+      const t = (i - prev) / (next - prev);
+      return (raw[prev] as number) + t * ((raw[next] as number) - (raw[prev] as number));
+    });
+  }
+  // 1-2-1 weighted average over the day and its neighbours; a single missing
+  // day is bridged, a longer gap breaks the line.
+  return raw.map((v, i) => {
+    const parts: [number | null, number][] = [[raw[i - 1] ?? null, 1], [v, 2], [raw[i + 1] ?? null, 1]];
+    const present = parts.filter(([pv]) => pv != null) as [number, number][];
+    if (v == null && present.length < 2) return null;
+    if (present.length === 0) return null;
+    const w = present.reduce((a, [, pw]) => a + pw, 0);
+    return present.reduce((a, [pv, pw]) => a + pv * pw, 0) / w;
+  });
+}
+
+interface RowModel {
+  domain: TimelineDomain;
+  view: DomainView;
+  spec: TrendSpec;
+  raw: (number | null)[];
+  line: (number | null)[];
+  current: { value: number; date: string } | null;
+  weekAgo: number | null;
+  extreme: { value: number; date: string } | null;
+  currentInZone: boolean;
+}
+
+function buildRow(domain: TimelineDomain): RowModel {
+  const view = DOMAIN_VIEW[domain.key] ?? DOMAIN_VIEW.anxiety;
+  const raw = rawValues(domain);
+  const line = trendLine(raw, view.smooth);
+  const dates = domain.series.map((p) => p.date);
+
+  let spec = view.spec;
+  if (domain.key === "weight") {
+    const vals = raw.filter((v): v is number => v != null);
+    const lo = vals.length ? Math.min(...vals) : 0;
+    const hi = vals.length ? Math.max(...vals) : 1;
+    spec = { ...spec, min: Math.floor(lo - 3), max: Math.ceil(hi + 3) };
+  }
+
+  let curIdx = -1;
+  for (let i = raw.length - 1; i >= 0; i--) if (raw[i] != null) { curIdx = i; break; }
+  const current = curIdx >= 0 ? { value: raw[curIdx] as number, date: dates[curIdx] } : null;
+
+  let weekAgo: number | null = null;
+  if (curIdx >= 0) {
+    for (let i = curIdx - 7; i >= Math.max(0, curIdx - 10); i--) if (raw[i] != null) { weekAgo = raw[i]; break; }
+  }
+
+  let extreme: RowModel["extreme"] = null;
+  if (view.worse) {
+    raw.forEach((v, i) => {
+      if (v == null) return;
+      if (!extreme || (view.worse === "up" ? v > extreme.value : v < extreme.value)) extreme = { value: v, date: dates[i] };
+    });
+  }
+
+  const z = spec.concern;
+  const currentInZone = !!(current && z && current.value >= z.from && current.value <= z.to);
+
+  return { domain, view, spec, raw, line, current, weekAgo, extreme, currentInZone };
+}
+
+function deltaText(row: RowModel): string | null {
+  const { current, weekAgo, view } = row;
+  if (!current || weekAgo == null) return null;
+  if (row.domain.key === "socialization") {
+    return current.value === weekAgo ? "Same as a week ago" : `${view.fmtValue(weekAgo)} a week ago`;
+  }
+  const diff = current.value - weekAgo;
+  if (Math.abs(diff) < 0.01) return "Same as a week ago";
+  return `${diff > 0 ? "▲" : "▼"} from ${view.fmtValue(weekAgo)}${view.unit === "%" ? "%" : ""} a week ago`;
+}
+
+function extremeText(row: RowModel): string | null {
+  const { extreme, view, domain } = row;
+  if (!extreme || domain.key === "socialization") return null;
+  const word = view.worse === "up" ? "Peak" : "Low";
+  return `${word} ${view.fmtValue(extreme.value)}${view.unit === "/10" ? "/10" : view.unit === "%" ? "%" : view.unit === "h" ? "h" : ""} · ${fmtDate(extreme.date)}`;
+}
+
+function CurrentValue({ row, big }: { row: RowModel; big?: boolean }) {
+  const { current, view, domain, currentInZone } = row;
+  const color = currentInZone ? ALERT : "var(--text-primary)";
+  if (!current) return <span style={{ fontSize: big ? 32 : 22, color: "var(--text-secondary)" }}>—</span>;
+  if (domain.key === "socialization") {
+    return <span style={{ fontSize: big ? 26 : 18, fontWeight: 650, color }}>{view.fmtValue(current.value)}</span>;
+  }
+  return (
+    <span className="tl-tabular" style={{ color }}>
+      <span style={{ fontSize: big ? 36 : 26, fontWeight: 650, letterSpacing: "-0.02em" }}>{view.fmtValue(current.value)}</span>
+      <span style={{ fontSize: big ? 16 : 13, fontWeight: 500, marginLeft: 2, color: "var(--text-secondary)" }}>{view.unit === "lb" ? " lb" : view.unit}</span>
+    </span>
+  );
 }
 
 // ── Deterministic observation cards (no LLM) ─────────────────────────────────
@@ -85,7 +239,7 @@ function deriveObservationCards(domain: TimelineDomain): ObservationCard[] {
     const min = withValue.reduce((a, b) => (b.value < a.value ? b : a));
     const pick = new Date(max.date) >= new Date(min.date) ? { p: max, label: "high" } : { p: min, label: "low" };
     if (max.value !== min.value) {
-      cards.push({ date: pick.p.date, text: `Record ${pick.label} of ${pick.p.value}` });
+      cards.push({ date: pick.p.date, text: `Record ${pick.label} of ${Math.round(pick.p.value * 10) / 10}` });
     }
   }
 
@@ -105,63 +259,165 @@ function deriveObservationCards(domain: TimelineDomain): ObservationCard[] {
   return cards.slice(0, 3);
 }
 
-// ── "AI Summary · Notes Synthesis" — shared container styling for both the
-// main compact multi-domain list and the overlay's single-domain notes ──────
+// ── Caregiver notes ──────────────────────────────────────────────────────────
+//
+// Notes stand on their own, independent of the charts: every note in the
+// window (the union of each domain's assigned notes and the unassigned
+// bucket, de-duplicated), newest first, grouped by calendar week.
 
-function SynthesisCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="relative overflow-hidden"
-      style={{ background: "var(--surface-1)", border: "1px solid var(--accent)", borderRadius: 14 }}
-    >
-      <div
-        aria-hidden="true"
-        className="absolute top-0 left-0"
-        style={{
-          width: 0, height: 0,
-          borderTop: "18px solid var(--med-change-line)",
-          borderRight: "18px solid transparent",
-          opacity: 0.55,
-        }}
-      />
-      <div className="px-5 py-4">{children}</div>
-    </div>
-  );
+function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  const back = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - back);
+  return d.toISOString().slice(0, 10);
 }
 
-function SynthesisDisclaimer() {
-  return (
-    <p className="mt-3 pt-3" style={{ fontSize: 11, color: "var(--text-secondary)", borderTop: "1px solid var(--border)" }}>
-      AI-generated synthesis of caregiver notes. Attributed observations only — not a diagnosis.
-    </p>
-  );
+function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function allNotes(data: TimelineResponse): TimelineNote[] {
+  const seen = new Map<string, TimelineNote>();
+  for (const n of [...data.domains.flatMap((d) => d.notes), ...data.other_notes]) {
+    seen.set(`${n.date}|${n.author}`, n);
+  }
+  return [...seen.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+function eventsInRange(events: TimelineEventItem[], start: string, end: string): string[] {
+  const out: string[] = [];
+  for (const e of events) {
+    if (e.type === "episode" && e.start <= end && e.end >= start) out.push(`Episode ${fmtDate(e.start)}–${fmtDate(e.end)}`);
+    if (e.type === "med_change" && e.date >= start && e.date <= end) out.push(`Med change ${fmtDate(e.date)}`);
+  }
+  return out;
 }
 
 function VerbatimNote({ date, author, text }: { date: string; author: string; text: string }) {
   return (
-    <div className="rounded-lg px-3 py-2.5" style={{ background: "var(--surface-0)" }}>
-      <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>{fmtDate(date)} · {author}</p>
-      <p style={{ fontFamily: "var(--font-voice)", fontSize: 15, lineHeight: 1.5, marginTop: 2 }}>{text}</p>
+    <div className="rounded-lg px-4 py-3" style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}>
+      <p className="flex items-center gap-2" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+        <span
+          className="inline-block rounded-full px-2 py-0.5"
+          style={{ fontSize: 11, fontWeight: 600, color: AUTHOR_COLOR[author] ?? "var(--text-primary)", background: "var(--surface-0)", border: "1px solid var(--border)" }}
+        >
+          {author}
+        </span>
+        {fmtWeekday(date)}
+      </p>
+      <p style={{ fontFamily: "var(--font-voice)", fontSize: 15, lineHeight: 1.55, marginTop: 6 }}>{text}</p>
     </div>
   );
 }
 
+function CaregiverNotes({ data }: { data: TimelineResponse }) {
+  const notes = useMemo(() => allNotes(data), [data]);
+  const authors = useMemo(() => [...new Set(notes.map((n) => n.author))].sort(), [notes]);
+  const [author, setAuthor] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  const filtered = author ? notes.filter((n) => n.author === author) : notes;
+  const weeks: { start: string; notes: TimelineNote[] }[] = [];
+  for (const n of filtered) {
+    const start = mondayOf(n.date);
+    const last = weeks[weeks.length - 1];
+    if (last && last.start === start) last.notes.push(n);
+    else weeks.push({ start, notes: [n] });
+  }
+  const visibleWeeks = showAll ? weeks : weeks.slice(0, 3);
+
+  return (
+    <section className="mt-12">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Caregiver notes</h2>
+          <p className="mt-1" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            {notes.length} entries, shown exactly as written. Newest first.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[null, ...authors].map((a) => {
+            const active = author === a;
+            return (
+              <button
+                key={a ?? "all"}
+                onClick={() => setAuthor(a)}
+                aria-pressed={active}
+                className="px-3 py-1 rounded-full border"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  background: active ? "var(--text-primary)" : "var(--surface-1)",
+                  color: active ? "#fff" : "var(--text-primary)",
+                  borderColor: "var(--border)",
+                }}
+              >
+                {a ?? "All"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-7">
+        {visibleWeeks.map((w) => {
+          const end = addDays(w.start, 6);
+          const evs = eventsInRange(data.events, w.start, end);
+          return (
+            <div key={w.start} className="grid gap-3 md:grid-cols-[150px_1fr]">
+              <div className="md:pt-3">
+                <p style={{ fontSize: 13, fontWeight: 600 }}>Week of {fmtDate(w.start)}</p>
+                <p style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  {w.notes.length} note{w.notes.length !== 1 ? "s" : ""}
+                </p>
+                {evs.map((e) => (
+                  <span
+                    key={e}
+                    className="inline-block mt-1.5 mr-1 rounded px-1.5 py-0.5"
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      background: e.startsWith("Episode") ? "var(--episode-band)" : "var(--surface-1)",
+                      color: e.startsWith("Episode") ? "#8A1C12" : "var(--text-primary)",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    {e}
+                  </span>
+                ))}
+              </div>
+              <div className="space-y-2">
+                {w.notes.map((n) => (
+                  <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {weeks.length > 3 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-6 px-4 py-2 rounded-lg border"
+          style={{ fontSize: 13, fontWeight: 600, background: "var(--surface-1)", borderColor: "var(--border)" }}
+        >
+          {showAll ? "Show recent weeks only" : `Show ${weeks.length - 3} earlier week${weeks.length - 3 !== 1 ? "s" : ""}`}
+        </button>
+      )}
+    </section>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function TimelineClient({ patientId }: { patientId: number }) {
-  const [window_, setWindow] = useState<TimelineWindow>("1m");
+  const [window_, setWindow] = useState<TimelineWindow>("2m");
   const [data, setData] = useState<TimelineResponse | null>(null);
   const [error, setError] = useState(false);
   const [overlayDomain, setOverlayDomain] = useState<string | null>(null);
-  const [otherNotesOpen, setOtherNotesOpen] = useState(false);
-  const [weekFilter, setWeekFilter] = useState<{ start: string; end: string } | null>(null);
-
-  function openOverlay(key: string) {
-    setWeekFilter(null);
-    setOverlayDomain(key);
-  }
-  function closeOverlay() {
-    setWeekFilter(null);
-    setOverlayDomain(null);
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -190,16 +446,22 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
     return () => clearInterval(id);
   }, [data?.pending, patientId, window_]);
 
-  // Overlay respects the current window: closing/reopening or switching
-  // windows while it's open just re-renders against whatever `data` now is.
   useEffect(() => {
     if (!overlayDomain) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") closeOverlay();
+      if (e.key === "Escape") setOverlayDomain(null);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [overlayDomain]);
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    const order = ["anxiety", "sleep", "medication", "socialization", "cigarettes", "weight"];
+    return [...data.domains]
+      .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))
+      .map(buildRow);
+  }, [data]);
 
   if (error) {
     return (
@@ -217,10 +479,12 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
     );
   }
 
-  const overlayDomainData = data.domains.find((d) => d.key === overlayDomain) ?? null;
+  const dates = data.domains[0]?.series.map((p) => p.date) ?? [];
+  const overlayRow = rows.find((r) => r.domain.key === overlayDomain) ?? null;
+  const rowAspect = `${TREND_CFG.row.vbW} / ${TREND_CFG.row.vbH}`;
 
   return (
-    <div className={`${lora.variable} clinician-timeline px-6 py-8 max-w-[1100px] mx-auto`}>
+    <div className={`${lora.variable} clinician-timeline px-4 sm:px-6 py-8 max-w-[1180px] mx-auto`}>
       {/* Header */}
       <h1 style={{ fontSize: 22, fontWeight: 600 }}>{data.patient.name}</h1>
       <p className="tl-tabular mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
@@ -234,7 +498,7 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
         className="mt-4 p-4"
         style={{ background: "var(--surface-1)", borderRadius: 12, fontSize: 18, lineHeight: 1.5 }}
       >
-        {data.headline}
+        {prettyDates(data.headline)}
         <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
           <span>{fmtGeneratedAt(data.headline_generated_at)}</span>
           {data.pending && (
@@ -249,208 +513,162 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
         </div>
       </div>
 
-      {/* Time toggle */}
-      <div className="flex gap-2 mt-5">
-        {WINDOW_LABELS.map(({ key, label }) => {
-          const available = data.available_windows.includes(key);
-          const active = window_ === key;
-          return (
-            <button
-              key={key}
-              disabled={!available}
-              onClick={() => setWindow(key)}
-              aria-pressed={active}
-              className="px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors"
-              style={{
-                background: active ? "var(--accent)" : "var(--surface-1)",
-                color: active ? "#fff" : available ? "var(--text-primary)" : "var(--text-secondary)",
-                borderColor: "var(--border)",
-                opacity: available ? 1 : 0.45,
-                cursor: available ? "pointer" : "not-allowed",
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Domain tile grid */}
-      <div
-        className="mt-5"
-        style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}
-      >
-        {data.domains.map((d) => {
-          const weekly = weeklyChartData(d);
-          return (
-            <button
-              key={d.key}
-              onClick={() => openOverlay(d.key)}
-              className="text-left border relative"
-              style={{ background: "var(--surface-1)", borderRadius: 14, borderColor: "var(--border)", padding: "16px 18px" }}
-            >
-              <div className="flex items-center justify-between">
-                <span style={{ fontSize: 16, fontWeight: 600 }}>{d.label}</span>
-                {/* Maximize icon — purely an affordance; the whole tile opens the overlay. */}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" aria-hidden="true">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-              <div style={{ aspectRatio: "300 / 140", marginTop: 8 }}>
-                <TimelineChart
-                  dates={weekly.dates}
-                  series={weekly.series}
-                  axis={d.axis}
-                  events={data.events}
-                  size="small"
-                  pointRanges={weekly.ranges}
-                  bandLabels={d.band_labels}
-                />
-              </div>
-              <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>{d.caption}</p>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Legend */}
-      <div className="flex items-center gap-5 mt-4" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-3" style={{ background: "var(--episode-band)", borderRadius: 2 }} />
-          Episode
-        </span>
-        <span className="flex items-center gap-1.5">
-          <svg width="20" height="10" aria-hidden="true">
-            <line x1="0" y1="5" x2="20" y2="5" stroke="var(--med-change-line)" strokeWidth={1.5} strokeDasharray="4,3" />
-          </svg>
-          Med change
-        </span>
-      </div>
-
-      {/* Caregiver notes — compact multi-domain synthesis; each row opens
-          the same full-screen overlay the grid tiles do. */}
-      <div className="mt-8">
-        <h2 style={{ fontSize: 16, fontWeight: 600 }}>Caregiver notes</h2>
-        <p className="mt-1 mb-3" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          Summaries are generated. Entries are shown exactly as written.
-        </p>
-
-        <SynthesisCard>
-          <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
-            AI SUMMARY · NOTES SYNTHESIS
-          </p>
-          <div className="mt-2 divide-y" style={{ borderColor: "var(--border)" }}>
-            {data.domains.map((d) => (
+      {/* Time toggle + legend */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-6">
+        <div className="flex gap-2">
+          {WINDOW_LABELS.map(({ key, label }) => {
+            const available = data.available_windows.includes(key);
+            const active = window_ === key;
+            return (
               <button
-                key={d.key}
-                onClick={() => openOverlay(d.key)}
-                className="w-full flex items-start justify-between gap-4 py-3 text-left"
+                key={key}
+                disabled={!available}
+                onClick={() => setWindow(key)}
+                aria-pressed={active}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors"
+                style={{
+                  background: active ? "var(--accent)" : "var(--surface-1)",
+                  color: active ? "#fff" : available ? "var(--text-primary)" : "var(--text-secondary)",
+                  borderColor: "var(--border)",
+                  opacity: available ? 1 : 0.45,
+                  cursor: available ? "pointer" : "not-allowed",
+                }}
               >
-                <div className="min-w-0">
-                  <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-secondary)" }}>
-                    {d.label.toUpperCase()}
-                  </p>
-                  <p
-                    className="mt-1"
-                    style={{
-                      fontSize: 13, lineHeight: 1.5, color: "var(--text-primary)",
-                      display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-                    }}
-                  >
-                    {d.summary}
-                  </p>
-                </div>
-                <span className="flex-shrink-0 whitespace-nowrap" style={{ fontSize: 12, color: "var(--accent)" }}>
-                  {d.notes.length} note{d.notes.length !== 1 ? "s" : ""} ›
-                </span>
+                {label}
               </button>
-            ))}
-          </div>
-          <SynthesisDisclaimer />
-        </SynthesisCard>
-
-        {/* Unassigned bucket — no chart to open an overlay onto, so it stays
-            a simple inline expander. */}
-        <div className="mt-3">
-          <button
-            onClick={() => setOtherNotesOpen((v) => !v)}
-            aria-expanded={otherNotesOpen}
-            className="w-full flex items-center justify-between text-left gap-4"
-          >
-            <span style={{ fontSize: 14, fontWeight: 600 }}>Other notes</span>
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{data.other_notes.length} entries</span>
-          </button>
-          {otherNotesOpen && (
-            <div className="mt-3 space-y-2">
-              {data.other_notes.length === 0 ? (
-                <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>Nothing unassigned this window.</p>
-              ) : (
-                data.other_notes.map((n) => <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />)
-              )}
-            </div>
-          )}
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-4" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+          <span className="flex items-center gap-1.5">
+            <svg width="22" height="10" aria-hidden="true">
+              <line x1="1" y1="5" x2="21" y2="5" stroke="var(--accent)" strokeWidth={2.5} strokeLinecap="round" />
+            </svg>
+            Trend
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: "var(--text-primary)", opacity: 0.35 }} />
+            Daily log
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3" style={{ background: "#FDEBE3", border: `1px solid ${ALERT}`, borderRadius: 2 }} />
+            Watch zone
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3" style={{ background: "var(--episode-band)", borderRadius: 2 }} />
+            Episode
+          </span>
+          <span className="flex items-center gap-1.5">
+            <svg width="20" height="10" aria-hidden="true">
+              <line x1="0" y1="5" x2="20" y2="5" stroke="var(--text-primary)" strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="5,4" />
+            </svg>
+            Med change
+          </span>
         </div>
       </div>
 
+      {/* Stacked trend rows on one shared time axis */}
+      <div className="mt-4 overflow-hidden" style={{ background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 14 }}>
+        <div className="hidden md:grid md:grid-cols-[210px_1fr]" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div />
+          <div style={{ aspectRatio: `${TREND_CFG.row.vbW} / 44` }}>
+            <TrendAxis dates={dates} events={data.events} />
+          </div>
+        </div>
+        {rows.map((row, i) => {
+          const delta = deltaText(row);
+          const ext = extremeText(row);
+          return (
+            <button
+              key={row.domain.key}
+              onClick={() => setOverlayDomain(row.domain.key)}
+              className="w-full text-left grid md:grid-cols-[210px_1fr] items-center transition-colors hover:bg-[var(--surface-0)]"
+              style={{ borderTop: i === 0 ? "none" : "1px solid var(--border)" }}
+            >
+              <div className="px-4 pt-3 md:py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.02em", color: "var(--text-secondary)", textTransform: "uppercase" }}>
+                    {row.domain.label}
+                  </span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" aria-hidden="true">
+                    <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div className="mt-0.5">
+                  <CurrentValue row={row} />
+                </div>
+                {delta && <p className="tl-tabular" style={{ fontSize: 12, color: "var(--text-secondary)" }}>{delta}</p>}
+                {ext && <p className="tl-tabular" style={{ fontSize: 12, color: "var(--text-secondary)" }}>{ext}</p>}
+              </div>
+              <div className="px-1 md:px-0" style={{ aspectRatio: rowAspect }}>
+                <TrendChart dates={dates} raw={row.raw} line={row.line} spec={row.spec} events={data.events} size="row" />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Caregiver notes — standalone, not tied to any chart */}
+      <CaregiverNotes data={data} />
+
       {/* Full-screen overlay */}
-      {overlayDomainData && (
+      {overlayRow && (
         <div
           className="fixed inset-0 z-50 overflow-y-auto clinician-timeline"
           style={{ background: "var(--surface-0)" }}
         >
-          <div className="max-w-[1240px] mx-auto px-8 py-8">
-            <div className="flex items-start justify-between">
+          <div className="max-w-[1240px] mx-auto px-4 sm:px-8 py-8">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 style={{ fontSize: 28, fontWeight: 600 }}>{overlayDomainData.label}</h2>
+                <h2 style={{ fontSize: 28, fontWeight: 600 }}>{overlayRow.domain.label}</h2>
                 <p className="tl-tabular mt-1" style={{ fontSize: 14, color: "var(--text-secondary)" }}>
                   {data.patient.name} · {fmtDate(data.patient.range_start)}–{fmtDate(data.patient.range_end)}
                 </p>
               </div>
-              <button
-                onClick={closeOverlay}
-                aria-label="Close"
-                className="rounded-full p-2"
-                style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+              <div className="flex items-start gap-6">
+                <div className="text-right">
+                  <CurrentValue row={overlayRow} big />
+                  {deltaText(overlayRow) && <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>{deltaText(overlayRow)}</p>}
+                </div>
+                <button
+                  onClick={() => setOverlayDomain(null)}
+                  aria-label="Close"
+                  className="rounded-full p-2"
+                  style={{ background: "var(--surface-1)", border: "1px solid var(--border)" }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-primary)" strokeWidth="2">
+                    <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
-            {(() => {
-              const weekly = weeklyChartData(overlayDomainData);
-              return (
-                <div className="mt-6" style={{ height: 400 }}>
-                  <TimelineChart
-                    dates={weekly.dates}
-                    series={weekly.series}
-                    axis={overlayDomainData.axis}
-                    events={data.events}
-                    size="large"
-                    pointRanges={weekly.ranges}
-                    bandLabels={overlayDomainData.band_labels}
-                    onPointClick={(i) => setWeekFilter(weekly.ranges[i])}
-                  />
-                </div>
-              );
-            })()}
+            <div className="mt-6 p-2" style={{ background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 14, aspectRatio: `${TREND_CFG.large.vbW} / ${TREND_CFG.large.vbH}` }}>
+              <TrendChart
+                dates={dates}
+                raw={overlayRow.raw}
+                line={overlayRow.line}
+                spec={overlayRow.spec}
+                events={data.events}
+                size="large"
+              />
+            </div>
 
             {/* Monthly highs & lows */}
-            {overlayDomainData.monthly_extremes.length > 0 && (
+            {overlayRow.domain.monthly_extremes.length > 0 && (
               <div className="mt-6">
                 <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-secondary)" }}>
                   MONTHLY HIGH / LOW
                 </p>
-                <div className="mt-2 grid gap-3" style={{ gridTemplateColumns: `repeat(${overlayDomainData.monthly_extremes.length}, 1fr)` }}>
-                  {overlayDomainData.monthly_extremes.map((m) => (
+                <div className="mt-2 grid gap-3" style={{ gridTemplateColumns: `repeat(${overlayRow.domain.monthly_extremes.length}, 1fr)` }}>
+                  {overlayRow.domain.monthly_extremes.map((m) => (
                     <div key={m.month} className="p-3 border" style={{ borderRadius: 10, borderColor: "var(--border)", background: "var(--surface-1)" }}>
                       <p style={{ fontSize: 13, fontWeight: 600 }}>{m.month}</p>
                       <p className="mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        High: {formatExtreme(m.high, overlayDomainData.axis, overlayDomainData.band_labels)} ({fmtDate(m.high.date)})
+                        High: {formatExtreme(m.high, overlayRow.domain.key)} ({fmtDate(m.high.date)})
                       </p>
                       <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        Low: {formatExtreme(m.low, overlayDomainData.axis, overlayDomainData.band_labels)} ({fmtDate(m.low.date)})
+                        Low: {formatExtreme(m.low, overlayRow.domain.key)} ({fmtDate(m.low.date)})
                       </p>
                     </div>
                   ))}
@@ -460,7 +678,7 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
 
             {/* Deterministic observation cards */}
             {(() => {
-              const cards = deriveObservationCards(overlayDomainData);
+              const cards = deriveObservationCards(overlayRow.domain);
               if (cards.length === 0) return null;
               return (
                 <div className="mt-6 grid gap-3" style={{ gridTemplateColumns: `repeat(${cards.length}, 1fr)` }}>
@@ -473,55 +691,6 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
                 </div>
               );
             })()}
-
-            {/* This domain's notes, in the same synthesis-card container.
-                Clicking a week on the chart above scopes this list to that
-                week; the summary paragraph only makes sense unscoped, so it
-                hides while a week filter is active. */}
-            <div className="mt-6">
-              <SynthesisCard>
-                <div className="flex items-center justify-between gap-4">
-                  <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--accent)" }}>
-                    AI SUMMARY · {overlayDomainData.label.toUpperCase()}
-                  </p>
-                  {weekFilter && (
-                    <button
-                      onClick={() => setWeekFilter(null)}
-                      style={{ fontSize: 12, color: "var(--accent)", whiteSpace: "nowrap" }}
-                    >
-                      Clear week filter ×
-                    </button>
-                  )}
-                </div>
-                {weekFilter ? (
-                  <p className="mt-2" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                    Showing notes for the week of {fmtDate(weekFilter.start)}–{fmtDate(weekFilter.end)}.
-                  </p>
-                ) : (
-                  <p className="mt-2" style={{ fontSize: 14, lineHeight: 1.6 }}>{overlayDomainData.summary}</p>
-                )}
-                {(() => {
-                  const visibleNotes = weekFilter
-                    ? overlayDomainData.notes.filter((n) => n.date >= weekFilter.start && n.date <= weekFilter.end)
-                    : overlayDomainData.notes;
-                  if (visibleNotes.length === 0) {
-                    return (
-                      <p className="mt-3" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        {weekFilter ? "No notes logged that week." : "No caregiver notes on record."}
-                      </p>
-                    );
-                  }
-                  return (
-                    <div className="mt-3 space-y-2">
-                      {visibleNotes.map((n) => (
-                        <VerbatimNote key={`${n.date}-${n.author}`} date={n.date} author={n.author} text={n.text} />
-                      ))}
-                    </div>
-                  );
-                })()}
-                <SynthesisDisclaimer />
-              </SynthesisCard>
-            </div>
           </div>
         </div>
       )}

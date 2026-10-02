@@ -1,14 +1,19 @@
 """Demo-only seed for the clinician timeline build (Radial pilot conversation).
 
-Marcus R., Jul 12 - Sep 10 2026, 53 of 61 days logged. Every value below
-comes verbatim from the source dataset this script was built from — nothing
-here is invented. See the module docstring on models.Patient.is_demo for why
-this can exist without triggering a BAA: it is fake data, gated by is_demo,
-and this script is the only thing that ever sets that flag true.
+Marcus R., Aug 2 - Oct 1 2026, 54 of 61 days logged. Fictional data. See the
+module docstring on models.Patient.is_demo for why this can exist without
+triggering a BAA: it is fake data, gated by is_demo, and this script is the
+only thing that ever sets that flag true.
 
-Rebased from an earlier Dec 2025/Jan 2026 version to a rolling window ending
-"yesterday" relative to whenever this is next re-run before a demo — Sep 11
-(today, as of the version this was rebased to) is deliberately NOT seeded:
+Two acts. Act one is the original source dataset's story (home from the
+hospital on olanzapine, weight gain, stops meds, a psychotic episode held at
+home, switch to aripiprazole), compressed into Aug 2 - Aug 31. Act two
+(Sep) was added for the Oct 2 demo: a real recovery on aripiprazole peaking
+mid-month, then akathisia, missed doses, early warning signs caught in the
+log this time, a dose cut on Sep 23, and a partial recovery into Oct 1.
+
+The window ends "yesterday" relative to the demo — Oct 2 (today, as of this
+version) is deliberately NOT seeded:
 that is the day a caregiver logs live during the Phase 2 demo. Do not seed
 it here, and do not backfill it by any other means (in particular, never
 use the caregiver app's "mark all missed days as nothing notable" button on
@@ -82,110 +87,123 @@ DEMO_CAREGIVER_EMAIL = "demo.caregiver@advocate.health"
 DEMO_CLINICIAN_EMAIL = "demo.clinician@advocate.health"
 DEMO_PASSWORD = "MarcusDemo2026!"
 PATIENT_NAME = "Marcus R."
-MED_CHANGE_DATE = date(2026, 8, 24)
+# Olanzapine -> aripiprazole 10mg, then aripiprazole cut to 5mg for akathisia.
+# Each date gets its own med_change TimelineEvent (dashed marker on every chart).
+MED_SWITCH_DATE = date(2026, 8, 31)
+DOSE_CUT_DATE = date(2026, 9, 23)
+MED_CHANGE_DATES = [MED_SWITCH_DATE, DOSE_CUT_DATE]
 
-# ── Source data, verbatim ────────────────────────────────────────────────────
+# ── Dataset ──────────────────────────────────────────────────────────────────
 #
-# Rebased from an earlier Dec 2025/Jan 2026 version to Jul 12 - Sep 10 2026 —
-# same story, same shape, same values, only the dates (and four in-note
-# references that depend on them: the backfill note's weekdays, "next month"
-# instead of a named month, the corrected weight-delta number, and the
-# backstory moving to "the spring") moved. Sep 11 (today, as of this version)
-# is deliberately absent — that is the day a caregiver logs live during the
-# Phase 2 demo.
+# Oct 2 (today, as of this version) is deliberately absent — that is the day
+# a caregiver logs live during the demo. Unlogged days: Aug 8, Aug 16, Aug
+# 25-27 (the episode), Sep 7, Sep 19.
+#
+# socialization: low = stayed home, medium = left the house, high = left the
+# house and had a good-quality contact (see _socialization_band).
 
 DAILY_CSV = """date,sleep_hours,anxiety,cigarettes,socialization,meds_taken,weight_lb,logged_by
-2026-07-12,9.5,3,none,medium,true,198,mom
-2026-07-13,9.5,2,none,medium,true,,mom
-2026-07-14,10.0,3,none,medium,true,,mom
-2026-07-15,9.5,3,low,medium,true,,mom
-2026-07-16,10.0,2,low,medium,true,,mom
-2026-07-17,10.0,2,low,medium,true,,dad
-2026-07-19,9.5,3,low,medium,true,203,mom
-2026-07-20,10.0,3,low,medium,true,,mom
-2026-07-21,9.5,4,medium,medium,true,,mom
-2026-07-22,9.5,3,low,medium,true,,mom
-2026-07-23,10.0,5,medium,medium,true,,mom
-2026-07-24,10.0,3,low,medium,true,,dad
-2026-07-26,9.0,5,medium,medium,true,208,mom
-2026-07-27,8.5,5,medium,medium,true,,mom
-2026-07-28,8.0,6,medium,medium,false,,mom
-2026-07-29,8.0,6,medium,medium,true,,mom
-2026-07-30,4.5,7,high,medium,true,,mom
-2026-07-31,4.0,7,high,medium,false,,dad
-2026-08-01,4.0,8,high,medium,false,,brother
-2026-08-02,4.0,7,high,medium,false,212,mom
-2026-08-05,4.0,8,high,medium,false,,mom
-2026-08-06,3.5,8,high,low,false,,mom
-2026-08-08,4.0,8,high,low,false,,mom
-2026-08-09,3.5,9,high,low,false,214,mom
-2026-08-10,4.0,8,high,low,false,,brother
-2026-08-11,4.0,8,high,low,false,,mom
-2026-08-12,4.0,8,high,low,false,,mom
-2026-08-13,3.5,8,high,low,false,,mom
-2026-08-14,4.0,8,high,low,false,,brother
-2026-08-15,3.5,8,high,low,false,,mom
-2026-08-16,3.5,9,high,low,false,216,mom
-2026-08-17,3.0,9,high,low,false,,mom
-2026-08-18,2.0,9,high,low,false,,mom
-2026-08-19,1.0,10,high,low,false,,mom
-2026-08-23,14.0,5,medium,low,false,,mom
-2026-08-24,11.0,5,medium,low,true,,mom
-2026-08-25,10.5,5,medium,low,true,,mom
-2026-08-26,10.0,5,medium,low,true,,mom
-2026-08-27,8.0,5,medium,low,true,,mom
-2026-08-28,8.0,5,medium,medium,true,,dad
-2026-08-29,8.5,5,medium,medium,true,,mom
-2026-08-30,8.0,5,medium,medium,true,217,mom
-2026-08-31,7.5,5,medium,medium,true,,mom
-2026-09-01,4.5,6,medium,medium,true,,mom
-2026-09-02,4.5,6,medium,medium,true,,mom
-2026-09-03,4.0,7,high,low,true,,mom
-2026-09-04,7.0,5,medium,medium,true,,brother
-2026-09-05,7.5,5,medium,medium,true,,mom
-2026-09-06,7.0,5,medium,medium,true,215,mom
-2026-09-07,4.5,5,medium,medium,true,,mom
-2026-09-08,4.5,5,medium,medium,true,,mom
-2026-09-09,7.0,5,medium,medium,true,,mom
-2026-09-10,7.5,5,medium,medium,true,,mom
+2026-08-02,9.5,3,none,medium,true,198,mom
+2026-08-03,9.5,2,none,medium,true,,mom
+2026-08-04,10.0,2,low,medium,true,,mom
+2026-08-05,10.0,2,low,high,true,,brother
+2026-08-06,9.5,3,low,medium,true,203,mom
+2026-08-07,10.0,4,medium,medium,true,,mom
+2026-08-09,9.5,5,medium,low,true,,mom
+2026-08-10,9.0,5,medium,medium,true,208,mom
+2026-08-11,8.5,6,medium,medium,false,,mom
+2026-08-12,8.0,6,medium,medium,true,,mom
+2026-08-13,7.0,7,high,medium,false,,dad
+2026-08-14,4.5,7,high,medium,false,,brother
+2026-08-15,4.0,7,high,low,false,211,mom
+2026-08-17,4.0,8,high,low,false,,mom
+2026-08-18,3.5,8,high,low,false,,mom
+2026-08-19,4.0,8,high,low,false,213,mom
+2026-08-20,3.5,9,high,low,false,,mom
+2026-08-21,4.0,8,high,low,false,,brother
+2026-08-22,3.5,9,high,low,false,,mom
+2026-08-23,2.0,9,high,low,false,215,mom
+2026-08-24,1.0,10,high,low,false,,mom
+2026-08-28,14.0,5,medium,low,false,,mom
+2026-08-29,11.0,5,medium,low,false,,mom
+2026-08-30,10.5,5,medium,low,false,216,mom
+2026-08-31,10.5,5,medium,low,true,,mom
+2026-09-01,10.0,5,medium,low,true,,mom
+2026-09-02,9.0,4,medium,low,true,,mom
+2026-09-03,8.5,4,medium,medium,true,,dad
+2026-09-04,8.0,4,medium,medium,true,,mom
+2026-09-05,8.0,3,low,high,true,,brother
+2026-09-06,8.0,3,low,medium,true,214,mom
+2026-09-08,7.5,3,low,medium,true,,mom
+2026-09-09,8.0,2,low,high,true,,mom
+2026-09-10,7.5,2,low,high,true,,mom
+2026-09-11,8.0,2,none,medium,true,,dad
+2026-09-12,7.5,2,low,high,true,212,mom
+2026-09-13,7.5,3,low,medium,true,,mom
+2026-09-14,6.0,5,medium,medium,true,,mom
+2026-09-15,5.0,6,medium,low,true,,mom
+2026-09-16,4.5,7,high,low,true,,brother
+2026-09-17,4.0,7,high,low,false,,mom
+2026-09-18,4.0,8,high,low,false,,mom
+2026-09-20,3.5,8,high,low,false,,mom
+2026-09-21,3.0,9,high,low,false,,brother
+2026-09-22,3.5,8,high,low,false,,mom
+2026-09-23,4.5,7,high,low,true,,mom
+2026-09-24,5.5,6,high,low,true,,mom
+2026-09-25,6.0,6,medium,low,true,,mom
+2026-09-26,6.5,5,medium,medium,true,,dad
+2026-09-27,7.0,5,medium,medium,true,212,mom
+2026-09-28,5.0,6,medium,medium,true,,mom
+2026-09-29,7.0,4,medium,medium,true,,mom
+2026-09-30,7.5,4,low,high,true,,brother
+2026-10-01,7.0,4,medium,medium,true,,mom
 """
 
 NOTES_CSV = '''date,author,note
-2026-07-12,mom,"First night home. Slept in his own bed. Took his meds without being asked."
-2026-07-15,mom,"He asked when he can go back to school. I said we would talk to the doctor. He didn't push it. Saw him smoking on the back steps, first time since before the hospital."
-2026-07-17,dad,"Good day. Watched the game with his brother. Ate a lot. Two or three cigarettes."
-2026-07-19,mom,"Up five pounds in a week. He got on the scale and didn't say anything."
-2026-07-21,mom,"He's hungry constantly. Eating at 11pm. Out on the steps more today, maybe six or seven."
-2026-07-23,mom,"Wouldn't come to his cousin's thing. Said he didn't want anyone to see him. Smoked through most of the afternoon."
-2026-07-26,mom,"Ten pounds. He had to buy new pants today and he was quiet the whole ride home."
-2026-07-28,mom,"He told me the pills are why he's getting fat and he's done. I told him to call Dr. Ellison. He said the appointment isn't until next month and he's not waiting."
-2026-07-29,mom,"Took them today. I asked and he said fine."
-2026-07-30,mom,"He asked me to buy him a carton. I said no. He got a ride from someone."
-2026-07-31,dad,"Said he took them. I didn't see it. Marking no because I don't know."
-2026-08-01,brother,"He was up when I got home at 1. Said he couldn't sleep. There were probably fifteen butts in the coffee can on the steps. He didn't take anything today, I checked the bottle count."
-2026-08-02,mom,"Still gaining even though he stopped. He said it's not working, so what's the point."
-2026-08-05,mom,"He's pacing. Not talking much. Different than last week. Goes out to smoke every twenty minutes."
-2026-08-06,mom,"Up at 2am. I found him in the kitchen just standing there with the light off. He said he was getting water. The whole coat smells like smoke now."
-2026-08-08,mom,"Sixteen pounds since he came home. He won't get on the scale, I had to ask three times."
-2026-08-09,mom,"He's talking faster. I've seen this before. He went through most of a pack today."
-2026-08-10,brother,"He didn't go out. I stayed in with him. He's fine but he's not fine, if that makes sense. I don't want to overreact but I'm writing it down."
-2026-08-11,mom,"He didn't come down for anything today. I left a plate outside the door."
-2026-08-13,mom,"Third day he hasn't left the house. Not the yard, the house. He's smoking in his room with the window open and I'm not going to fight him about it right now."
-2026-08-14,brother,"I asked if he wanted to get food and he said no. He hasn't said no to that before. Told him I'd be around if he wanted to talk. He didn't."
-2026-08-15,mom,"Still going up even though he hasn't taken anything in over two weeks. He said that proves the doctor was lying."
-2026-08-16,mom,"He hasn't left the house in six days. Nine if you count going outside as leaving."
-2026-08-18,mom,"He was up all night. I heard him moving around at 3 and again at 5. When I came down he was already talking, fast, about school and about a professor he had for one week back in the spring."
-2026-08-19,mom,"Something is wrong. He thinks the neighbor's car is there for him. He asked me twice if I told anyone he was home. He hasn't slept."
-2026-08-23,mom,"I'm writing this down now because I couldn't then. Wednesday the 19th he stopped sleeping entirely. Thursday he was up the whole night and most of Friday, talking the whole time, going from one thing to the next without finishing. He was convinced someone had been in the house. Friday night his dad wanted to call 911. I said no because the last time they took him it was three months and he came home a different person. I called the crisis line instead and they talked me through it and stayed on with me for an hour. Saturday he slept fourteen hours. Today he's flat. Not scared anymore, just gone. I did not log those days. I want that on the record. I wasn't going to be on my phone."
-2026-08-24,mom,"Appointment. Dr. Ellison went through the whole thing on his screen before he even asked us anything. He said the weight gain was real and he should have heard about it in July. He's stopping the olanzapine and starting him on something else. Marcus agreed to it. I think he agreed because someone finally said the weight was the drug's fault and not his."
-2026-08-26,mom,"Third day taking it. He asks me every morning if it's going to make him gain more."
-2026-08-28,dad,"He came to dinner. Sat there for maybe twenty minutes but he came."
-2026-09-01,mom,"Sleeping worse again. I don't know if that's the new one or if it's just him."
-2026-09-03,mom,"Bad day. Wouldn't come out of his room, back to a pack. His dad said something at breakfast about him getting a job and it went badly."
-2026-09-04,brother,"Took him to get food and he actually ate. He asked about going back to school in the spring. I didn't say anything either way."
+2026-08-02,mom,"First night home. Slept in his own bed. Took his meds without being asked."
+2026-08-04,mom,"He asked when he can go back to school. I said we would talk to the doctor. He didn't push it. Saw him smoking on the back steps, first time since before the hospital."
+2026-08-05,brother,"Good day. Took him to watch the game at Mike's. He laughed at something for the first time since he's been back. Ate a lot. Two or three cigarettes."
+2026-08-06,mom,"Up five pounds already. He got on the scale and didn't say anything."
+2026-08-07,mom,"He's hungry constantly. Eating at 11pm. Out on the steps more today, maybe six or seven."
+2026-08-09,mom,"Wouldn't come to his cousin's thing. Said he didn't want anyone to see him. Smoked through most of the afternoon."
+2026-08-10,mom,"Ten pounds. He had to buy new pants today and he was quiet the whole ride home."
+2026-08-11,mom,"He told me the pills are why he's getting fat and he's done. I told him to call Dr. Ellison. He said the appointment isn't until the end of the month and he's not waiting."
+2026-08-12,mom,"Took them today. I asked and he said fine."
+2026-08-13,dad,"Said he took them. I didn't see it. Marking no because I don't know."
+2026-08-14,brother,"He was up when I got home at 1. Said he couldn't sleep. There were probably fifteen butts in the coffee can on the steps. He didn't take anything today, I checked the bottle count."
+2026-08-15,mom,"Still gaining even though he stopped. He said it's not working, so what's the point."
+2026-08-17,mom,"He's pacing. Not talking much. Different than last week. Goes out to smoke every twenty minutes."
+2026-08-18,mom,"Up at 2am. I found him in the kitchen just standing there with the light off. He said he was getting water. The whole coat smells like smoke now."
+2026-08-19,mom,"Fifteen pounds since he came home. He won't get on the scale, I had to ask three times."
+2026-08-20,mom,"He's talking faster. I've seen this before. He went through most of a pack today."
+2026-08-21,brother,"He didn't go out. I stayed in with him. He's fine but he's not fine, if that makes sense. I don't want to overreact but I'm writing it down."
+2026-08-22,mom,"He didn't come down for anything today. I left a plate outside the door. He's smoking in his room with the window open and I'm not going to fight him about it right now."
+2026-08-23,mom,"He was up all night. I heard him moving around at 3 and again at 5. When I came down he was already talking, fast, about school and about a professor he had for one week back in the spring."
+2026-08-24,mom,"Something is wrong. He thinks the neighbor's car is there for him. He asked me twice if I told anyone he was home. He hasn't slept."
+2026-08-28,mom,"I'm writing this down now because I couldn't then. Tuesday the 25th he stopped sleeping entirely. He was up all Tuesday night and all of Wednesday, talking the whole time, going from one thing to the next without finishing. He was convinced someone had been in the house. Wednesday night his dad wanted to call 911. I said no because the last time they took him it was three months and he came home a different person. I called the crisis line instead and they talked me through it and stayed on with me for an hour. Last night he finally slept, fourteen hours. Today he's flat. Not scared anymore, just gone. I did not log those days. I want that on the record. I wasn't going to be on my phone."
+2026-08-31,mom,"Appointment. Dr. Ellison went through the whole thing on his screen before he even asked us anything. He said the weight gain was real and he should have heard about it weeks ago. He's stopping the olanzapine and starting him on something else. Marcus agreed to it. I think he agreed because someone finally said the weight was the drug's fault and not his."
+2026-09-02,mom,"Third day taking it. He asks me every morning if it's going to make him gain more."
+2026-09-03,dad,"He came to dinner. Sat there for maybe twenty minutes but he came."
+2026-09-05,brother,"Took him to get food and he actually ate. He asked about going back to school in the spring. Down to a couple cigarettes. I didn't say anything either way but it was good."
 2026-09-06,mom,"Down two pounds. First time the number has gone the other way since he came home. He got on the scale on his own."
-2026-09-08,mom,"Up at 4 again. He's not upset, he just isn't sleeping."
-2026-09-10,mom,"Two and a half weeks on it now, no missed doses. He's better than he was. He's not what he was in January."
+2026-09-09,mom,"He called Danny himself. First time he's called anyone. They walked to the park and he was gone three hours."
+2026-09-10,mom,"He asked me to drive him to the community college so he could ask about spring classes. He talked to the woman at the desk himself. I waited in the car and cried a little."
+2026-09-11,dad,"Helped me clean out the gutters. Didn't smoke at all that I saw. Talked about the Braves the whole time."
+2026-09-12,mom,"Best day since he came home. Danny came over and they were laughing in the kitchen. Down another two pounds. Sleeping through the night."
+2026-09-14,mom,"He can't sit still. Up and down from the couch all through dinner. Says his legs feel wrong. This is different from August. He's not scared, he's uncomfortable."
+2026-09-15,mom,"Pacing the hallway at midnight. He said it's his body, not his head. He didn't go out today."
+2026-09-16,brother,"Tried to watch a movie with him. He got up eleven times, I counted. He kept saying sorry. Back to most of a pack."
+2026-09-17,mom,"Didn't take it. Says it makes him feel like he wants to crawl out of his skin. I don't blame him for not wanting to feel that but I'm scared of August again."
+2026-09-18,mom,"Second day without it. Not pacing as much, but not sleeping either. I called Dr. Ellison's office and left a message."
+2026-09-20,mom,"He asked me if the phone was recording him. Same look he had in August. I'm not waiting this time. I called the office again and said it's urgent."
+2026-09-21,brother,"He didn't come out. I sat outside his door for a while. He said he's not going back on anything, ever."
+2026-09-22,mom,"Nurse called back. She pulled up his log while we were on the phone and saw the restlessness started before he stopped taking it, not after. Video visit with Dr. Ellison tomorrow."
+2026-09-23,mom,"Video visit. Dr. Ellison said what he's describing has a name, and that it's common on this one, and it's not him being difficult. Cutting the dose in half. Marcus took it tonight. He said if it doesn't help he's done. That's the most he's said in a week."
+2026-09-25,mom,"Slept six hours. Still restless at night but he sat through dinner."
+2026-09-26,dad,"Went for a drive with me. Didn't say much but he asked to go."
+2026-09-28,mom,"Rough night. Up at 3. I don't know if it's the medicine or just a bad night. He took it anyway without me asking."
+2026-09-30,brother,"Dinner at Aunt Rosa's. He stayed two hours. Talked to our cousin about video games for most of it. Only had two cigarettes the whole night."
+2026-10-01,mom,"Eight days back on it, none missed. His legs are calmer. He's not where he was mid-month, but he's not where he was last week either. He asked me to write down that he still wants to talk about school."
 '''
 
 # Cigarette band -> a representative count consistent with both
@@ -194,15 +212,15 @@ NOTES_CSV = '''date,author,note
 # "fifteen" / "most of a pack" -> high).
 CIGARETTE_COUNT_BY_BAND = {"none": 0, "low": 3, "medium": 7, "high": 15}
 
-# The Aug 23 entry is a backfill: logged on the 23rd, describing Aug 19-22.
-# It renders under Aug 23 (its own `date`); the episode window is carried
-# separately in `episode`, not split into four fake daily rows.
-EPISODE_START = "2026-08-19"
-EPISODE_END = "2026-08-22"
+# The Aug 28 entry is a backfill: logged on the 28th, describing Aug 25-27.
+# It renders under Aug 28 (its own `date`); the episode window is carried
+# separately in `episode`, not split into fake daily rows.
+EPISODE_START = "2026-08-25"
+EPISODE_END = "2026-08-27"
 EPISODE_OUTCOME = "held_at_home"
-EPISODE_LOGGED_AT = "2026-08-23"
+EPISODE_LOGGED_AT = "2026-08-28"
 EPISODE_DESCRIPTION = (
-    "Stopped sleeping starting the night of the 19th. Up through the night and most of "
+    "Stopped sleeping starting the night of the 25th. Up through the night and all of "
     "the next day, talking continuously, convinced someone had been in the house. "
     "Family called the crisis line rather than 911. Logging stopped during this window."
 )
@@ -308,11 +326,14 @@ def main() -> None:
         )
         if not new_med:
             new_med = models.Medication(
-                patient_id=patient.id, name="Aripiprazole", dose="10mg",
+                patient_id=patient.id, name="Aripiprazole", dose="5mg",
                 frequency="daily", time_of_day="evening", active=True,
             )
             db.add(new_med)
             db.flush()
+        # Current dose after the Sep 23 cut (started at 10mg on Aug 31).
+        # Medication has no dose history, so earlier rows just reference it.
+        new_med.dose = "5mg"
         db.commit()
 
         notes_by_date = {}
@@ -325,18 +346,18 @@ def main() -> None:
             log_date = date.fromisoformat(row["date"])
             author = author_by_name[row["logged_by"]]
             taken = row["meds_taken"] == "true"
-            med_id = old_med.id if log_date < MED_CHANGE_DATE else new_med.id
+            med_id = old_med.id if log_date < MED_SWITCH_DATE else new_med.id
 
             weight = row["weight_lb"].strip()
             vitals = {"cigarettes": str(CIGARETTE_COUNT_BY_BAND[row["cigarettes"]])}
             if weight:
                 vitals["weight_lb"] = float(weight)
 
-            socialization = (
-                {"left_house": True, "had_contact": False, "contact_ids": [], "quality": None, "initiated_by": None}
-                if row["socialization"] == "medium" else
-                {"left_house": False, "had_contact": False, "contact_ids": [], "quality": None, "initiated_by": None}
-            )
+            socialization = {
+                "high": {"left_house": True, "had_contact": True, "contact_ids": [], "quality": "good", "initiated_by": None},
+                "medium": {"left_house": True, "had_contact": False, "contact_ids": [], "quality": None, "initiated_by": None},
+                "low": {"left_house": False, "had_contact": False, "contact_ids": [], "quality": None, "initiated_by": None},
+            }[row["socialization"]]
 
             episode = None
             note_text = None
@@ -370,9 +391,10 @@ def main() -> None:
             ))
             seeded += 1
 
-        db.add(models.TimelineEvent(
-            patient_id=patient.id, type="med_change", date=MED_CHANGE_DATE, label="Med change",
-        ))
+        for change_date in MED_CHANGE_DATES:
+            db.add(models.TimelineEvent(
+                patient_id=patient.id, type="med_change", date=change_date, label="Med change",
+            ))
 
         # Cache row starts empty/pending — the first real generation happens
         # via the same on-write hook a live log save uses (see
