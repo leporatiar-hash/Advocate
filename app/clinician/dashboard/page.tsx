@@ -257,11 +257,10 @@ function DashboardContent() {
 
         {prefs.viewMode === "quick" ? (
           <>
-            {/* Quick View is the calm read: no glance banner, the caregiver
-                alert in neutral tones, then trends, the AI summary, and what
-                went well. Raw Notes stays collapsed last so every "N notes"
+            {/* Quick View is the calm read: no glance banner — trends, the
+                AI summary, what went well, then the caregiver alert in
+                neutral tones. Raw Notes stays collapsed last so every "N notes"
                 link has something to reveal. */}
-            <CalmCaregiverAlert topFlag={top_flag} patientId={patientId} />
             <QuickView patientId={patientId} />
             {renderModule("summary")}
             <WhatWentWellSummary
@@ -269,6 +268,7 @@ function DashboardContent() {
               items={clinical_summary?.what_went_well ?? []}
               onReveal={revealNotes}
             />
+            <CalmCaregiverAlert topFlag={top_flag} patientId={patientId} />
             {renderModule("rawNotes")}
           </>
         ) : (
