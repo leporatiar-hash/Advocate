@@ -1,8 +1,8 @@
-import TimelineClient from "./TimelineClient";
+import RedirectToDashboard from "./RedirectToDashboard";
 
-// Demo-only clinician timeline (Radial pilot conversation) — NOT the
-// production clinician portal. A true dynamic segment works under this
-// app's `output: "export"` only because the demo is single-patient by
+// Retired demo timeline route: now redirects to the patient's regular
+// clinician dashboard. Kept (rather than deleted) so old links still land.
+// A true dynamic segment works under this app's `output: "export"` only because the demo is single-patient by
 // design (see the spec this was built from: no patient list, no linking
 // flow — the association is hardcoded). MARCUS_PATIENT_ID here must match
 // backend/scripts/seed_demo_patient.py's reserved ID exactly, or the
@@ -19,5 +19,5 @@ export default async function ClinicianTimelinePage({
   params: Promise<{ patientId: string }>;
 }) {
   const { patientId } = await params;
-  return <TimelineClient patientId={Number(patientId)} />;
+  return <RedirectToDashboard patientId={Number(patientId)} />;
 }

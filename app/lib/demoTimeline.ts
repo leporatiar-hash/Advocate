@@ -12,6 +12,11 @@
 export const DEMO_CLINICIAN_EMAIL = "demo.clinician@advocate.health";
 export const DEMO_TIMELINE_PATIENT_ID = 999999;
 
+// The demo account opens straight onto Marcus in the regular clinician
+// dashboard (Quick View + Configure). The standalone timeline view is retired;
+// its old URL redirects here too.
+export const DEMO_PATIENT_DASHBOARD = `/clinician/dashboard/?patient_id=${DEMO_TIMELINE_PATIENT_ID}`;
+
 export function isDemoTimelineClinician(email: string | undefined | null): boolean {
   return (email ?? "").toLowerCase() === DEMO_CLINICIAN_EMAIL;
 }
@@ -20,7 +25,7 @@ export function isDemoTimelineClinician(email: string | undefined | null): boole
 // before this feature existed — only the clinician branch is new.
 export function postLoginDestination(role: string, email: string | undefined | null): string {
   if (role === "clinician") {
-    return isDemoTimelineClinician(email) ? `/clinician/${DEMO_TIMELINE_PATIENT_ID}/` : "/clinician";
+    return isDemoTimelineClinician(email) ? DEMO_PATIENT_DASHBOARD : "/clinician";
   }
   return "/dashboard";
 }

@@ -7,7 +7,7 @@ import Image from "next/image";
 import toast from "react-hot-toast";
 import { Lora, DM_Sans } from "next/font/google";
 import { api } from "../lib/api";
-import { isDemoTimelineClinician, DEMO_TIMELINE_PATIENT_ID } from "../lib/demoTimeline";
+import { isDemoTimelineClinician, DEMO_PATIENT_DASHBOARD } from "../lib/demoTimeline";
 import { useAuth } from "../components/AuthProvider";
 import type { AuthResponse } from "../lib/types";
 
@@ -69,7 +69,7 @@ export default function RegisterPage() {
       // Caregiver onboarding sets up a patient, which makes no sense for a
       // clinician — they get patients only by redeeming a share code.
       const clinicianDestination = isDemoTimelineClinician(res.user.email)
-        ? `/clinician/${DEMO_TIMELINE_PATIENT_ID}/`
+        ? DEMO_PATIENT_DASHBOARD
         : "/clinician";
       router.push(role === "clinician" ? clinicianDestination : "/onboarding");
     } catch (err: unknown) {
