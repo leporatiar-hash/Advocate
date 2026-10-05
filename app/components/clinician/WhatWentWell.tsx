@@ -41,3 +41,48 @@ export function WhatWentWell({ items }: { items: WhatWentWellItem[] }) {
     </div>
   );
 }
+
+/** Quick View version: a titled card with the AI's two-sentence summary and
+ * one link that reveals every note it was drawn from. Falls back to the
+ * dated list when the cached synthesis predates the summary. */
+export function WhatWentWellSummary({
+  summary,
+  items,
+  onReveal,
+}: {
+  summary: string | undefined;
+  items: WhatWentWellItem[];
+  onReveal: (dates: string[]) => void;
+}) {
+  const dates = [...new Set(items.map((i) => i.date))].sort();
+  return (
+    <div>
+      <h2 className="text-sm font-bold uppercase tracking-wide mb-2" style={{ color: "var(--cp-text-muted)" }}>
+        What went well
+      </h2>
+      {summary && items.length ? (
+        <div className="rounded-2xl p-5" style={{ background: "#fff", border: "1px solid var(--cp-border)" }}>
+          <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap">
+            <p className="text-sm leading-relaxed flex-1" style={{ color: "var(--cp-text)" }}>{summary}</p>
+            <button
+              type="button"
+              onClick={() => onReveal(dates)}
+              className="text-xs font-semibold whitespace-nowrap hover:underline flex-shrink-0 ml-auto"
+              style={{ color: "var(--cp-teal)" }}
+            >
+              {dates.length} note{dates.length !== 1 ? "s" : ""} ›
+            </button>
+          </div>
+          <p
+            className="text-xs italic pt-3 mt-3"
+            style={{ color: "var(--cp-text-muted)", borderTop: "1px solid var(--cp-border)" }}
+          >
+            AI-generated from caregiver notes. Attributed observations. Not a diagnosis.
+          </p>
+        </div>
+      ) : (
+        <WhatWentWell items={items} />
+      )}
+    </div>
+  );
+}

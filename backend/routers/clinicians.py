@@ -284,6 +284,8 @@ def get_clinician_portal(
         for insight in (clinical_summary or {}).get("insights", [])
         for note_id in insight.get("source_note_ids", [])
     }
+    # Same for What Went Well's "N notes" link.
+    cited_dates |= {item["date"] for item in (clinical_summary or {}).get("what_went_well", [])}
     recent_periods = notable_periods[:5]
     recent_dates = {p["date"].isoformat() for p in recent_periods}
     cited_periods = [

@@ -389,6 +389,9 @@ export interface WhatWentWellItem {
 export interface ClinicalSummary {
   insights: InsightUnit[];
   what_went_well: WhatWentWellItem[];
+  /** Two-sentence prose version of what_went_well (Quick View). Empty or
+   * missing on syntheses generated before it existed. */
+  what_went_well_summary?: string;
   generated_at: string;
   window_days: number;
   validation_warnings: string[];

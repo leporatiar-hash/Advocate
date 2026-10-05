@@ -41,3 +41,33 @@ export function RankedFlag({ topFlag, patientId }: { topFlag: TopFlag | null; pa
     </Link>
   );
 }
+
+/** Quick View version: the same single highest-severity note, in a quiet
+ * neutral card instead of red. Still links to the full day's log. */
+export function CalmCaregiverAlert({ topFlag, patientId }: { topFlag: TopFlag | null; patientId: number }) {
+  return (
+    <div>
+      <h2 className="text-sm font-bold uppercase tracking-wide mb-2" style={{ color: "var(--cp-text-muted)" }}>
+        Caregiver alert
+      </h2>
+      {topFlag ? (
+        <Link
+          href={`/clinician/log/?patient_id=${patientId}&date=${topFlag.date}`}
+          className="block rounded-2xl px-5 py-4 transition-colors hover:opacity-90"
+          style={{ background: "#fff", border: "1px solid var(--cp-border)", borderLeft: "3px solid var(--cp-teal)" }}
+        >
+          <p className="text-xs font-semibold" style={{ color: "var(--cp-text-muted)" }}>
+            Caregiver note · {fmtDate(topFlag.date)}
+          </p>
+          <p className="text-sm italic mt-1.5" style={{ color: "var(--cp-text)" }}>
+            &ldquo;{topFlag.quote ?? topFlag.text}&rdquo;
+          </p>
+        </Link>
+      ) : (
+        <div className="rounded-2xl px-5 py-4" style={{ background: "#fff", border: "1px solid var(--cp-border)" }}>
+          <p className="text-sm" style={{ color: "var(--cp-text-muted)" }}>Nothing flagged by caregivers this period.</p>
+        </div>
+      )}
+    </div>
+  );
+}

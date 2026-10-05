@@ -478,6 +478,7 @@ class WhatWentWellItem(BaseModel):
 class ClinicalSummary(BaseModel):
     insights: List[InsightUnit]
     what_went_well: List[WhatWentWellItem] = []
+    what_went_well_summary: str = ""
     generated_at: datetime
     window_days: int
     validation_warnings: List[str] = []

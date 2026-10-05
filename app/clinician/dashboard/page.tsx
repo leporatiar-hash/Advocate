@@ -12,8 +12,8 @@ import { RecentNotes } from "../../components/clinician/RecentNotes";
 import { InsightUnits } from "../../components/clinician/InsightUnits";
 import { GlanceLayer } from "../../components/clinician/GlanceLayer";
 import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
-import { RankedFlag } from "../../components/clinician/RankedFlag";
-import { WhatWentWell } from "../../components/clinician/WhatWentWell";
+import { RankedFlag, CalmCaregiverAlert } from "../../components/clinician/RankedFlag";
+import { WhatWentWell, WhatWentWellSummary } from "../../components/clinician/WhatWentWell";
 import { CustomizeControl } from "../../components/clinician/CustomizeControl";
 import { QuickView } from "../../components/clinician/QuickView";
 import {
@@ -257,16 +257,19 @@ function DashboardContent() {
 
         {prefs.viewMode === "quick" ? (
           <>
-            {/* Same portal payload the Detailed view already fetches — Caregiver
-                Alert (via GlanceLayer) and What Went Well are agreed-on, not
-                optional, regardless of which layout is on screen. Raw Notes
-                stays collapsed below the AI Summary so each insight's
-                "N notes" link has something to reveal. */}
-            <GlanceLayer portal={portal} />
+            {/* Quick View is the calm read: no glance banner, the caregiver
+                alert in neutral tones, then trends, the AI summary, and what
+                went well. Raw Notes stays collapsed last so every "N notes"
+                link has something to reveal. */}
+            <CalmCaregiverAlert topFlag={top_flag} patientId={patientId} />
             <QuickView patientId={patientId} />
             {renderModule("summary")}
+            <WhatWentWellSummary
+              summary={clinical_summary?.what_went_well_summary}
+              items={clinical_summary?.what_went_well ?? []}
+              onReveal={revealNotes}
+            />
             {renderModule("rawNotes")}
-            <WhatWentWell items={portal.clinical_summary?.what_went_well ?? []} />
           </>
         ) : (
           <>

@@ -19,6 +19,7 @@ deterministic, tier-and-event-aware fallback (fallback_headline below) mean a
 slow or failed OpenAI call degrades to a plain sentence, never a blank page.
 """
 import json
+import re
 import os
 from datetime import date
 
@@ -45,9 +46,8 @@ SYSTEM_PROMPT = (
     "already covers). If `notable_events` is empty, say plainly that nothing "
     "else notable was logged this window. Never invent an event not listed.\n"
     "C. WHAT HELD STEADY — name the symptoms in `steady_symptoms` as unchanged "
-    "this window. If that list is empty, state plainly that nothing else was "
-    "flagged this window — that is itself the information, not something to "
-    "skip past.\n\n"
+    "this window. If that list is empty, skip this slot entirely; never write "
+    "a sentence saying nothing held steady or nothing else was flagged.\n\n"
     "HARD RULES, no exceptions:\n"
     "1. PRESENT, NEVER DIAGNOSE, NEVER RECOMMEND. State what the data shows, "
     "never a clinical conclusion, cause, or suggested action. \"Suicidal "
@@ -61,12 +61,12 @@ SYSTEM_PROMPT = (
     "'worsening', which outranks 'improving' or 'resolved'. Never open by "
     "counting how many symptoms got better if anything red or amber moved, "
     "emerged, or persisted — that reads as reassurance when it is not.\n"
-    "3. NUMBERS ARE THE POINT. State the actual from->to values and deltas "
-    "you were given — do not omit them, and never invent or adjust a number. "
-    "If `granularity` is not \"daily scores\", these numbers are averages (e.g. "
-    "a weekly or monthly mean), not any single observed score — phrase the "
-    "change as a change in that average (\"the weekly average is up...\"), "
-    "never imply one day's score moved by that amount.\n"
+    "3. NO NUMBERS. Caregiver scores are not on a clinical scale, so never "
+    "print a score, average, delta, percentage, or count (no \"5.0\", no "
+    "\"from 5.5 to 3.5\", no \"3 missed doses\"). Use the from/to values only "
+    "to choose the direction and size in words: \"rose sharply\", \"eased\", "
+    "\"missed doses most weeks\". Timing in words is fine (\"late August\", "
+    "\"early October\"); exact day-level dates are not needed.\n"
     "4. ADHERENCE — ONLY IF ORDERING IS GIVEN. Mention medication adherence "
     "in slot A only when `adherence_ordering` is present, and state the "
     "ordering exactly as given: which one's onset date came first (or that "
@@ -76,16 +76,16 @@ SYSTEM_PROMPT = (
     "5. ONLY USE THE FACTS PROVIDED. Never reference a symptom, value, event, "
     "or date that isn't in the input. Never speculate about why something "
     "changed.\n"
-    "6. PLAIN SENTENCES, NO MARKDOWN. No bullet points, no em dashes. Three "
-    "to five sentences total across all three slots, reading as one short "
+    "6. PLAIN SENTENCES, NO MARKDOWN. No bullet points, no em dashes. Two "
+    "to three sentences total across the slots, reading as one short "
     "paragraph — not labeled sections.\n"
     "7. NEVER PRINT THE WORDS \"tier\", \"red-tier\", \"amber-tier\", or "
     "\"routine\" in the output. `tier` is an internal ranking field for you "
     "to use ONLY to decide what leads (rule 2) — it is not a clinical label "
     "and the color name is not information. Describe urgency in plain terms "
     "instead (the symptom, its value, and its trajectory already carry the "
-    "urgency) — e.g. \"agitation reached 10/10\" not \"a red-tier symptom "
-    "reached 10/10\", and never \"amber-tier anxiety\" or similar.\n\n"
+    "urgency) — e.g. \"agitation rose sharply\" not \"a red-tier symptom "
+    "rose sharply\", and never \"amber-tier anxiety\" or similar.\n\n"
     "Return ONLY valid JSON: {\"headline\": \"...\"} — no markdown fences, no "
     "extra text."
 )
@@ -212,6 +212,12 @@ def generate_headline(
     headline = (data.get("headline") or "").strip()
     if not headline:
         raise ValueError("Model returned an empty headline")
+    # Slot C is skipped when nothing held steady (prompt rule), but the model
+    # doesn't always comply — drop any "nothing held steady" filler sentence.
+    if not steady_symptoms(symptoms):
+        sentences = re.split(r"(?<=[.!?])\s+", headline)
+        kept = [x for x in sentences if not re.search(r"\b(steady|unchanged|nothing else)\b", x, re.IGNORECASE)]
+        headline = " ".join(kept).strip() or headline
     return headline
 
 
@@ -231,11 +237,13 @@ def _describe_event(f: dict, bin_days: int) -> str:
         return f"{name} has started appearing, not logged at all before this."
     if event == "resolved":
         return f"{name} is no longer being logged, after occurring regularly before."
+    # No raw numbers: caregiver scores aren't on a clinical scale, so the
+    # headline carries direction only (see SYSTEM_PROMPT rule 3).
     if event == "persisting":
-        return f"{name} remains elevated at {f['current_value']:.1f}/10 with no real change."
+        return f"{name} remains elevated with no real change."
     if event in ("worsening", "improving"):
-        verb = "up" if event == "worsening" else "down"
-        return f"{name}{avg_note} is {verb} {abs(f['delta']):.1f} points, from {f['baseline_value']:.1f} to {f['current_value']:.1f}."
+        verb = "rising" if event == "worsening" else "easing"
+        return f"{name}{avg_note} is {verb}."
     return f"{name} is unchanged."
 
 
@@ -269,7 +277,7 @@ def _describe_notable(notable_events: list) -> str:
 
 def _describe_steady(steady: list) -> str:
     if not steady:
-        return "Nothing else was flagged this window."
+        return ""
     if len(steady) == 1:
         return f"{steady[0]} held steady."
     return f"{', '.join(steady[:-1])} and {steady[-1]} held steady."
@@ -303,4 +311,4 @@ def fallback_headline(
     notable = _describe_notable(notable_events or [])
     steady = _describe_steady(steady_symptoms(symptoms))
 
-    return f"{moved} {notable} {steady}"
+    return f"{moved} {notable} {steady}".strip()

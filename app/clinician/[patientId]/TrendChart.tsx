@@ -101,6 +101,7 @@ export function TrendChart({
   spec,
   events,
   size,
+  plain = false,
 }: {
   dates: string[];
   /** Each day's logged value — drawn as faint dots. */
@@ -110,6 +111,9 @@ export function TrendChart({
   spec: TrendSpec;
   events: TimelineEventItem[];
   size: TrendSize;
+  /** Accent-only rendering (dashboard Quick View): no watch zone, no red
+   * in-zone line, and episodes as a neutral gray band. */
+  plain?: boolean;
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
   const cfg = TREND_CFG[size];
@@ -131,7 +135,7 @@ export function TrendChart({
   const segs = segments(line, x, y);
   const ticks = weekTicks(dates);
 
-  const zone = spec.concern
+  const zone = spec.concern && !plain
     ? { y1: y(Math.min(spec.max, spec.concern.to)), y2: y(Math.max(spec.min, spec.concern.from)) }
     : null;
 
@@ -194,9 +198,9 @@ export function TrendChart({
       {/* Episode band(s) */}
       {episodes.map((ep, i) => (
         <g key={`ep-${i}`}>
-          <rect x={ep.x1} y={top} width={ep.x2 - ep.x1} height={plotH} fill="var(--episode-band)" opacity={0.75} />
+          <rect x={ep.x1} y={top} width={ep.x2 - ep.x1} height={plotH} fill={plain ? "#E5E7EB" : "var(--episode-band)"} opacity={plain ? 0.6 : 0.75} />
           {large && (
-            <text x={(ep.x1 + ep.x2) / 2} y={top - 14} fontSize={14} fontWeight={600} textAnchor="middle" fill="#B42318">
+            <text x={(ep.x1 + ep.x2) / 2} y={top - 14} fontSize={14} fontWeight={600} textAnchor="middle" fill={plain ? "var(--text-secondary)" : "#B42318"}>
               {ep.label}
             </text>
           )}

@@ -137,7 +137,8 @@ Produce a JSON object with exactly this shape:
       "observation": "one short attributed positive observation, under 20 words, plain language, non-diagnostic",
       "date": "YYYY-MM-DD, the exact date this was logged, from the valid list above"
     }}
-  ]
+  ],
+  "what_went_well_summary": "exactly two cohesive sentences that together summarize every what_went_well item above"
 }}
 
 Rules for insights:
@@ -152,7 +153,13 @@ Rules for what_went_well:
 - Surface positive caregiver-logged engagement: an activity, outing, social contact, or coping strategy the patient took part in (asked to join a day program, went surfing, a walk, a coping strategy that helped, a steady stretch of days, and similar). Surface the engagement itself even if the same note also describes a difficult moment or an episode elsewhere in the account — do not withhold it just because something else in the note was hard.
 - Never assert improvement, recovery, or a positive trend, and never claim the engagement caused or prevented anything — state only that it happened.
 - "date" must be exactly one of the valid dates above.
-- If nothing in the notes qualifies as a positive observation, return an empty array. Do not invent one."""
+- If nothing in the notes qualifies as a positive observation, return an empty array. Do not invent one.
+
+Rules for what_went_well_summary:
+- Exactly two sentences, read together as one short paragraph, covering the what_went_well items above and nothing else.
+- Refer to the patient by first name, never "the patient".
+- Same rules as what_went_well: attributed, plain language, no dates, no counts, no em dashes, never assert improvement, recovery, or a trend.
+- Empty string if what_went_well is empty."""
 
     return SYSTEM_PROMPT, user_prompt
 
@@ -178,7 +185,7 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
     }
 
     if not periods:
-        return {"insights": [], "what_went_well": [], "validation_warnings": []}
+        return {"insights": [], "what_went_well": [], "what_went_well_summary": "", "validation_warnings": []}
 
     system_prompt, user_prompt = build_synthesis_prompt(patient, periods, med_names)
 
@@ -277,7 +284,27 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
 
         what_went_well.append({"observation": observation, "date": date_str})
 
-    return {"insights": insights, "what_went_well": what_went_well, "validation_warnings": warnings}
+    # Two-sentence prose version of what_went_well for the Quick View. Its
+    # "N notes" link reuses the validated what_went_well dates, never dates
+    # the model wrote into the prose itself.
+    what_went_well_summary = ""
+    if what_went_well:
+        what_went_well_summary = (data.get("what_went_well_summary") or "").strip().replace("\u2014", ",")
+        if _COUNT_CLAIM_PATTERN.search(what_went_well_summary):
+            warnings.append(
+                f"what_went_well_summary may contain a frequency/count claim — review before trusting: {what_went_well_summary!r}"
+            )
+        if _IMPROVEMENT_CLAIM_PATTERN.search(what_went_well_summary):
+            warnings.append(
+                f"what_went_well_summary may assert improvement/recovery — review before trusting: {what_went_well_summary!r}"
+            )
+
+    return {
+        "insights": insights,
+        "what_went_well": what_went_well,
+        "what_went_well_summary": what_went_well_summary,
+        "validation_warnings": warnings,
+    }
 
 
 # ── Temporal Data bin readouts ───────────────────────────────────────────────
