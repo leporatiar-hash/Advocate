@@ -108,6 +108,18 @@ input[type="range"]::-moz-range-thumb {
   color: var(--text-primary);
   min-height: 100vh;
 }
+/* Same chart tokens as .clinician-timeline, without the full-page shell, so
+   the timeline's TrendChart can be embedded in the dashboard's Quick View. */
+.clinician-tiles {
+  --surface-0: #FAFAF7;
+  --surface-1: #FFFFFF;
+  --text-primary: #1A2420;
+  --text-secondary: #6B7280;
+  --border: #E5E7EB;
+  --accent: #0F6B66;
+  --episode-band: #F7C1C1;
+  --med-change-line: #888780;
+}
 .clinician-timeline .tl-tabular {
   font-variant-numeric: tabular-nums;
 }

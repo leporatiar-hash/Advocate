@@ -15,7 +15,7 @@ import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
 import { RankedFlag } from "../../components/clinician/RankedFlag";
 import { WhatWentWell } from "../../components/clinician/WhatWentWell";
 import { CustomizeControl } from "../../components/clinician/CustomizeControl";
-import { SymptomTicker } from "../../components/clinician/SymptomTicker";
+import { QuickView } from "../../components/clinician/QuickView";
 import {
   SymptomTrendChart,
   SymptomSmallMultiples,
@@ -233,7 +233,7 @@ function DashboardContent() {
 
           {/* Time range, in one row with the header rather than buried in a
               section — it reframes every number on the page. Quick View has
-              its own range selector scoped to the chart, so this one (which
+              its own range selector scoped to its tiles, so this one (which
               reframes the whole detailed page) doesn't apply there. */}
           {prefs.viewMode === "detailed" && (
             <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: "var(--cp-border)" }}>
@@ -259,9 +259,13 @@ function DashboardContent() {
           <>
             {/* Same portal payload the Detailed view already fetches — Caregiver
                 Alert (via GlanceLayer) and What Went Well are agreed-on, not
-                optional, regardless of which layout is on screen. */}
+                optional, regardless of which layout is on screen. Raw Notes
+                stays collapsed below the AI Summary so each insight's
+                "N notes" link has something to reveal. */}
             <GlanceLayer portal={portal} />
-            <SymptomTicker patientId={patientId} patientName={patient.name} />
+            <QuickView patientId={patientId} />
+            {renderModule("summary")}
+            {renderModule("rawNotes")}
             <WhatWentWell items={portal.clinical_summary?.what_went_well ?? []} />
           </>
         ) : (

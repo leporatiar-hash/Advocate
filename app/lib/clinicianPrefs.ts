@@ -34,7 +34,13 @@ export type ViewMode = "detailed" | "quick";
 export interface ClinicianPrefs {
   modules: ClinicianModule[];
   viewMode: ViewMode;
+  /** Bumped when the default view changes, so a choice saved under an older
+   *  default is reset to the new one once rather than kept forever. */
+  viewModeVersion?: number;
 }
+
+// 2: Quick View (trend tiles + AI summary) became the default for everyone.
+const VIEW_MODE_VERSION = 2;
 
 /** Display metadata, kept out of storage so labels can change without a
  *  migration. Order here is the default dashboard order. */
@@ -52,7 +58,8 @@ export const MODULE_META: { id: ModuleId; label: string; description: string }[]
 
 export const DEFAULT_CLINICIAN_PREFS: ClinicianPrefs = {
   modules: MODULE_META.map((m) => ({ id: m.id, on: true })),
-  viewMode: "detailed",
+  viewMode: "quick",
+  viewModeVersion: VIEW_MODE_VERSION,
 };
 
 export function moduleLabel(id: ModuleId): string {
@@ -69,7 +76,7 @@ export function moduleDescription(id: ModuleId): string {
  * (on by default, so a new section is never invisible to someone with saved
  * prefs). Also backfills `viewMode` for prefs saved before it existed.
  */
-function reconcile(stored: { modules: ClinicianModule[]; viewMode?: string }): ClinicianPrefs {
+function reconcile(stored: { modules: ClinicianModule[]; viewMode?: string; viewModeVersion?: number }): ClinicianPrefs {
   const known = new Set(MODULE_META.map((m) => m.id));
   const seen = new Set<ModuleId>();
   const modules: ClinicianModule[] = [];
@@ -82,8 +89,9 @@ function reconcile(stored: { modules: ClinicianModule[]; viewMode?: string }): C
   for (const meta of MODULE_META) {
     if (!seen.has(meta.id)) modules.push({ id: meta.id, on: true });
   }
-  const viewMode: ViewMode = stored.viewMode === "quick" ? "quick" : "detailed";
-  return { modules, viewMode };
+  const current = stored.viewModeVersion === VIEW_MODE_VERSION;
+  const viewMode: ViewMode = !current ? DEFAULT_CLINICIAN_PREFS.viewMode : stored.viewMode === "detailed" ? "detailed" : "quick";
+  return { modules, viewMode, viewModeVersion: VIEW_MODE_VERSION };
 }
 
 /** v1 stored four booleans and no ordering. Map them onto the new list. */
@@ -113,7 +121,7 @@ export function loadClinicianPrefs(): ClinicianPrefs {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<ClinicianPrefs>;
-      if (Array.isArray(parsed?.modules)) return reconcile({ modules: parsed.modules, viewMode: parsed.viewMode });
+      if (Array.isArray(parsed?.modules)) return reconcile({ modules: parsed.modules, viewMode: parsed.viewMode, viewModeVersion: parsed.viewModeVersion });
       return DEFAULT_CLINICIAN_PREFS;
     }
     const legacy = window.localStorage.getItem(LEGACY_KEY);

@@ -628,3 +628,14 @@ export interface TimelineResponse {
   domains: TimelineDomain[];
   other_notes: TimelineNote[];
 }
+
+/** Dashboard Quick View tiles — see GET /clinicians/patient/{id}/quick-tiles. */
+export interface QuickTilesResponse {
+  window_days: number;
+  dates: string[];
+  events: TimelineEventItem[];
+  days_logged: number;
+  doses_expected: number;
+  doses_missed: number;
+  domains: { key: "sleep" | "anxiety" | "medication"; label: string; series: TimelineSeriesPoint[] }[];
+}

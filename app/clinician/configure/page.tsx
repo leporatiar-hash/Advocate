@@ -18,7 +18,7 @@ import {
 
 const VIEW_MODES: { id: ViewMode; label: string; description: string }[] = [
   { id: "detailed", label: "Detailed", description: "The full module dashboard configured below" },
-  { id: "quick", label: "Quick View", description: "One symptom ticker: what changed in the last 30 days" },
+  { id: "quick", label: "Quick View", description: "Sleep, anxiety and medication trends with the AI notes summary" },
 ];
 
 /**

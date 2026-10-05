@@ -9,7 +9,7 @@ import type { TimelineEventItem } from "../../lib/types";
 // whole point of the stacked layout is reading straight down a column
 // ("sleep fell the same week anxiety spiked").
 
-export type TrendSize = "row" | "large";
+export type TrendSize = "row" | "tile" | "large";
 
 export interface TrendSpec {
   min: number;
@@ -30,6 +30,8 @@ interface Cfg {
 
 export const TREND_CFG: Record<TrendSize, Cfg> = {
   row: { vbW: 1000, vbH: 96, pad: { top: 8, right: 8, bottom: 8, left: 8 }, stroke: 2.75, dot: 2.2 },
+  // Dashboard Quick View tiles (three across) — no labels, like a row.
+  tile: { vbW: 600, vbH: 200, pad: { top: 8, right: 8, bottom: 8, left: 8 }, stroke: 3, dot: 3 },
   large: { vbW: 1180, vbH: 460, pad: { top: 44, right: 28, bottom: 72, left: 76 }, stroke: 3.5, dot: 3.6 },
 };
 

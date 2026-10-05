@@ -230,6 +230,8 @@ export const api = {
   getClinicianDiagnoses: () => request("/clinicians/diagnoses"),
   getClinicianPortal: (patientId: number, windowDays = 30) =>
     request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
+  getClinicianQuickTiles: (patientId: number, windowDays = 30) =>
+    request(`/clinicians/patient/${patientId}/quick-tiles?window_days=${windowDays}`),
   getClinicianTemporal: (patientId: number) =>
     request(`/clinicians/patient/${patientId}/temporal`),
   // chartWindowDays must exceed the widest delta window (1Y = 365 days) or

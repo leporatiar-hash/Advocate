@@ -13,6 +13,8 @@ from auth import get_current_clinician
 from services.aggregation import (
     build_patient_aggregate,
     build_adherence_series,
+    build_timeline_domains,
+    build_timeline_events,
     build_flags,
     build_symptom_deltas,
     build_symptom_series,
@@ -33,6 +35,7 @@ from services.aggregation import (
     SLEEP_DATA_FLOOR,
     TEMPORAL_WINDOW_DAYS,
     TREND_LOW_N_DAYS,
+    TIMELINE_DOMAIN_DEFS,
 )
 from services.ticker_headline import fallback_headline, generate_headline, rank_symptoms
 
@@ -474,6 +477,83 @@ def get_symptom_ticker(
         "headline": headline,
         "headline_source": headline_source,
         "last_appointment_date": last_appointment_date,
+    }
+
+
+# Fixed set and order of the Quick View tiles.
+QUICK_TILE_KEYS = ("sleep", "anxiety", "medication")
+
+
+@router.get("/patient/{patient_id}/quick-tiles")
+def get_quick_tiles(
+    patient_id: int,
+    window_days: int = Query(default=30, ge=7, le=365),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_clinician),
+):
+    """Backs the dashboard's Quick View tiles — Sleep, Anxiety and Medication
+    as daily series over a trailing window ending today. Same per-day
+    extraction as the demo timeline (build_timeline_domains), but for any
+    patient linked to this clinician rather than is_demo patients only.
+    Unlogged days are explicit nulls, never filled."""
+    _get_linked_patient(patient_id, current_user, db)
+
+    today = datetime.now().date()
+    start = today - timedelta(days=window_days - 1)
+    dates = [start + timedelta(days=i) for i in range(window_days)]
+
+    logs = (
+        db.query(models.DailyLog)
+        .options(defer(models.DailyLog.photo))
+        .filter(
+            models.DailyLog.patient_id == patient_id,
+            models.DailyLog.date >= start,
+            models.DailyLog.date <= today,
+        )
+        .order_by(models.DailyLog.date.asc())
+        .all()
+    )
+    timeline_events = (
+        db.query(models.TimelineEvent)
+        .filter(
+            models.TimelineEvent.patient_id == patient_id,
+            models.TimelineEvent.date >= start,
+            models.TimelineEvent.date <= today,
+        )
+        .all()
+    )
+
+    domains = build_timeline_domains(logs, dates)
+    labels = {d["key"]: d["label"] for d in TIMELINE_DOMAIN_DEFS}
+
+    # The medication series is a rolling 7-day percentage, so the tile's
+    # "missed doses" caption needs its own exact count from the raw entries.
+    doses_expected = 0
+    doses_missed = 0
+    for log in logs:
+        for m in log.medications_taken or []:
+            doses_expected += 1
+            if not m.get("taken"):
+                doses_missed += 1
+
+    return {
+        "window_days": window_days,
+        "dates": [d.isoformat() for d in dates],
+        "events": build_timeline_events(logs, timeline_events),
+        "days_logged": len({log.date for log in logs}),
+        "doses_expected": doses_expected,
+        "doses_missed": doses_missed,
+        "domains": [
+            {
+                "key": key,
+                "label": labels[key],
+                "series": [
+                    {"date": d.isoformat(), "value": v, "band": b}
+                    for (d, v, b) in domains[key]
+                ],
+            }
+            for key in QUICK_TILE_KEYS
+        ],
     }
 
 
