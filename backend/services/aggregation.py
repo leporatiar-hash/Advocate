@@ -685,6 +685,10 @@ def build_trajectory(logs, start_date: date_type, end_date: date_type) -> list:
 # would have to reuse a hue, and two symptoms sharing a color on a clinical
 # chart is worse than not plotting the 6th. Remainder is disclosed in the UI.
 MAX_CHARTED_SYMPTOMS = 5
+# A symptom scored on fewer days than this in the window gets no chart — one
+# or two dots read as an empty chart. It's still counted in `omitted` and
+# still listed in Symptom Frequency. Same floor as TREND_LOW_N_DAYS.
+MIN_CHARTED_DAYS = 3
 
 
 def build_symptom_series(logs, start_date: date_type, end_date: date_type, limit: int = MAX_CHARTED_SYMPTOMS) -> dict:
@@ -695,7 +699,8 @@ def build_symptom_series(logs, start_date: date_type, end_date: date_type, limit
 
     Symptoms are ranked by how many days they were present (then by average
     severity) and capped at `limit`; the caller is told how many were omitted so
-    it can say so rather than silently truncating.
+    it can say so rather than silently truncating. Symptoms scored on fewer
+    than MIN_CHARTED_DAYS days are never charted and count as omitted.
     """
     by_symptom: dict = defaultdict(dict)
     for log in logs:
@@ -710,7 +715,7 @@ def build_symptom_series(logs, start_date: date_type, end_date: date_type, limit
         key=lambda kv: (len(kv[1]), sum(kv[1].values()) / len(kv[1]) if kv[1] else 0),
         reverse=True,
     )
-    charted = ranked[:limit]
+    charted = [kv for kv in ranked if len(kv[1]) >= MIN_CHARTED_DAYS][:limit]
     color_by_name = assign_color_indices(by_symptom.keys())
 
     dates = []

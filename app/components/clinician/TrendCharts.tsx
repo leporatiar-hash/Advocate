@@ -96,7 +96,9 @@ export function SymptomTrendChart({
     return (
       <ChartCard title="Symptom severity over time">
         <p className="text-sm py-6 text-center" style={{ color: "var(--cp-text-muted)" }}>
-          No symptoms have been scored in this window.
+          {block.omitted > 0
+            ? "Symptoms were scored on too few days to chart this window. See Symptom Frequency."
+            : "No symptoms have been scored in this window."}
         </p>
       </ChartCard>
     );
