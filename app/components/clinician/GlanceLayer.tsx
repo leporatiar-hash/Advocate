@@ -87,8 +87,9 @@ function MicroStat({
   );
 }
 
-export function GlanceLayer({ portal }: { portal: ClinicianPortalResponse }) {
+export function GlanceLayer({ portal, showSleep = false }: { portal: ClinicianPortalResponse; showSleep?: boolean }) {
   const { glance_stats } = portal;
+  const sleep = portal.stats.avg_sleep;
   const { status, headline } = deriveGlanceStatus(portal);
   const cfg = STATUS_CONFIG[status];
   const accentColor = status === "stable" ? "var(--cp-teal)" : "var(--cp-amber)";
@@ -106,7 +107,7 @@ export function GlanceLayer({ portal }: { portal: ClinicianPortalResponse }) {
       </span>
       <p className="text-base font-semibold mt-2 leading-snug" style={{ color: "var(--cp-text)" }}>{headline}</p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4 pt-4" style={{ borderTop: "1px solid var(--cp-border)" }}>
+      <div className={`grid grid-cols-2 ${showSleep ? "sm:grid-cols-5" : "sm:grid-cols-4"} gap-4 mt-4 pt-4`} style={{ borderTop: "1px solid var(--cp-border)" }}>
         <MicroStat
           label="Med Adherence"
           value={glance_stats.adherence.value != null ? `${glance_stats.adherence.value}%` : "—"}
@@ -139,6 +140,17 @@ export function GlanceLayer({ portal }: { portal: ClinicianPortalResponse }) {
               : "low"}
           </p>
         </div>
+        {showSleep && (
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--cp-text-muted)" }}>Avg Sleep</p>
+            <p className="cp-tabular text-2xl font-bold mt-0.5" style={{ color: "var(--cp-text)" }}>
+              {sleep.hours != null ? `${sleep.hours}h` : "—"}
+            </p>
+            <p className="text-xs font-semibold mt-0.5" style={{ color: "var(--cp-text-muted)" }}>
+              {sleep.days_logged} night{sleep.days_logged !== 1 ? "s" : ""} logged
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

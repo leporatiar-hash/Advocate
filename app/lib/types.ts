@@ -645,3 +645,13 @@ export interface QuickTilesResponse {
   doses_missed: number;
   domains: { key: "sleep" | "anxiety" | "medication"; label: string; series: TimelineSeriesPoint[] }[];
 }
+
+/** Detailed view "What changed" — see GET /clinicians/patient/{id}/changes. */
+export interface ChangesResponse {
+  kind: "visit" | "window";
+  days: number;
+  last_visit: string | null;
+  after_start: string;
+  changes: { metric: string; label: string; text: string; direction: "better" | "worse" | "neutral" }[];
+  steady: string[];
+}

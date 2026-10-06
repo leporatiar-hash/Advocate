@@ -230,6 +230,10 @@ export const api = {
   getClinicianDiagnoses: () => request("/clinicians/diagnoses"),
   getClinicianPortal: (patientId: number, windowDays = 30) =>
     request(`/clinicians/patient/${patientId}/portal?window_days=${windowDays}`),
+  getClinicianChanges: (patientId: number, compare: string, count: number, metrics: string[]) =>
+    request(
+      `/clinicians/patient/${patientId}/changes?compare=${compare}&limit=${count}&metrics=${encodeURIComponent(metrics.join(","))}`
+    ),
   getClinicianQuickTiles: (patientId: number, windowDays = 30) =>
     request(`/clinicians/patient/${patientId}/quick-tiles?window_days=${windowDays}`),
   getClinicianTemporal: (patientId: number) =>
@@ -248,6 +252,21 @@ export const api = {
     request(`/clinician/patient/${patientId}/timeline?window=${window}`),
   getClinicianLog: (patientId: number, dateStr: string) =>
     request(`/clinicians/patient/${patientId}/log/${dateStr}`),
+
+  // Demo-only clinician config writes — 404 for any non-demo patient.
+  // See backend/routers/clinician_demo_config.py.
+  getDemoPatientConfig: (patientId: number) =>
+    request(`/clinician/patient/${patientId}/config`),
+  updateDemoPatientConfig: (patientId: number, updates: object) =>
+    request(`/clinician/patient/${patientId}/config`, { method: "PATCH", body: JSON.stringify({ updates }) }),
+  addDemoPatientMedication: (patientId: number, data: object) =>
+    request(`/clinician/patient/${patientId}/medications`, { method: "POST", body: JSON.stringify(data) }),
+  removeDemoPatientMedication: (patientId: number, medId: number) =>
+    request(`/clinician/patient/${patientId}/medications/${medId}`, { method: "DELETE" }),
+  addDemoPatientContact: (patientId: number, name: string) =>
+    request(`/clinician/patient/${patientId}/contacts`, { method: "POST", body: JSON.stringify({ name }) }),
+  removeDemoPatientContact: (patientId: number, contactId: number) =>
+    request(`/clinician/patient/${patientId}/contacts/${contactId}`, { method: "DELETE" }),
 };
 
 // Utility: get local date string (YYYY-MM-DD) — avoids UTC offset shifting the date

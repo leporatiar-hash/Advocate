@@ -37,6 +37,7 @@ from services.aggregation import (
     TREND_LOW_N_DAYS,
     TIMELINE_DOMAIN_DEFS,
 )
+from services.changes import build_changes, resolve_spans
 from services.ticker_headline import fallback_headline, generate_headline, rank_symptoms
 
 logger = logging.getLogger(__name__)
@@ -485,6 +486,45 @@ def get_symptom_ticker(
         "headline": headline,
         "headline_source": headline_source,
         "last_appointment_date": last_appointment_date,
+    }
+
+
+@router.get("/patient/{patient_id}/changes")
+def get_changes(
+    patient_id: int,
+    compare: str = Query(default="visit", pattern=r"^(visit|\d{1,3})$"),
+    metrics: str = Query(default=""),
+    limit: int = Query(default=3, ge=1, le=10),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_clinician),
+):
+    """Backs the Detailed view's 'What changed' panel: the biggest changes
+    since the last visit (or the last N days vs the N before), past
+    per-metric cutoffs only — see services/changes.py. `metrics` is a
+    comma-separated subset of services.changes.METRIC_KEYS; empty means all."""
+    _get_linked_patient(patient_id, current_user, db)
+
+    treatment_plan = db.query(models.TreatmentPlan).filter(models.TreatmentPlan.patient_id == patient_id).first()
+    today = datetime.now().date()
+    spans = resolve_spans(today, compare, treatment_plan.last_appointment_date if treatment_plan else None)
+
+    logs = (
+        db.query(models.DailyLog)
+        .options(defer(models.DailyLog.photo))
+        .filter(
+            models.DailyLog.patient_id == patient_id,
+            models.DailyLog.date >= spans["before"][0],
+            models.DailyLog.date <= today,
+        )
+        .all()
+    )
+    result = build_changes(logs, spans, [m for m in metrics.split(",") if m], limit)
+    return {
+        "kind": spans["kind"],
+        "days": spans["days"],
+        "last_visit": spans["last_visit"],
+        "after_start": spans["after"][0].isoformat(),
+        **result,
     }
 
 

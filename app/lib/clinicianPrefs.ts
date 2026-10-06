@@ -22,7 +22,8 @@ export type ModuleId =
   | "trajectory"
   | "symptomFrequency"
   | "medAdherence"
-  | "rawNotes";
+  | "rawNotes"
+  | "averages";
 
 export interface ClinicianModule {
   id: ModuleId;
@@ -31,9 +32,36 @@ export interface ClinicianModule {
 
 export type ViewMode = "detailed" | "quick";
 
+export type ChangesCompare = "visit" | "14" | "30" | "60";
+
+/** Settings for the Detailed view's "What changed" panel. */
+export interface ChangesPrefs {
+  compare: ChangesCompare;
+  count: 3 | 5;
+  /** Subset of CHANGE_METRICS keys; all of them by default. */
+  metrics: string[];
+}
+
+export const CHANGE_METRICS: { key: string; label: string }[] = [
+  { key: "medication", label: "Medication" },
+  { key: "symptoms", label: "Symptoms" },
+  { key: "sleep", label: "Sleep" },
+  { key: "episodes", label: "Episodes" },
+  { key: "socialization", label: "Leaving the house" },
+  { key: "cigarettes", label: "Cigarettes" },
+  { key: "weight", label: "Weight" },
+];
+
+export const DEFAULT_CHANGES_PREFS: ChangesPrefs = {
+  compare: "visit",
+  count: 3,
+  metrics: CHANGE_METRICS.map((m) => m.key),
+};
+
 export interface ClinicianPrefs {
   modules: ClinicianModule[];
   viewMode: ViewMode;
+  changes: ChangesPrefs;
   /** Bumped when the default view changes, so a choice saved under an older
    *  default is reset to the new one once rather than kept forever. */
   viewModeVersion?: number;
@@ -44,7 +72,7 @@ const VIEW_MODE_VERSION = 2;
 
 /** Display metadata, kept out of storage so labels can change without a
  *  migration. Order here is the default dashboard order. */
-export const MODULE_META: { id: ModuleId; label: string; description: string }[] = [
+export const MODULE_META: { id: ModuleId; label: string; description: string; defaultOn?: boolean }[] = [
   { id: "summary", label: "AI Summary", description: "Notes synthesis with source-linked insights" },
   { id: "alerts", label: "Alerts & Positives", description: "Caregiver alert beside what went well" },
   { id: "symptomCharts", label: "Symptom Trends", description: "All symptoms on one severity chart" },
@@ -54,11 +82,13 @@ export const MODULE_META: { id: ModuleId; label: string; description: string }[]
   { id: "symptomFrequency", label: "Symptom Frequency", description: "Days present and average severity" },
   { id: "medAdherence", label: "Adherence by Medication", description: "Per-drug taken vs expected" },
   { id: "rawNotes", label: "Raw Notes", description: "Caregiver notes, chronological" },
+  { id: "averages", label: "Averages", description: "Period averages of key metrics, including sleep", defaultOn: false },
 ];
 
 export const DEFAULT_CLINICIAN_PREFS: ClinicianPrefs = {
-  modules: MODULE_META.map((m) => ({ id: m.id, on: true })),
+  modules: MODULE_META.map((m) => ({ id: m.id, on: m.defaultOn ?? true })),
   viewMode: "quick",
+  changes: DEFAULT_CHANGES_PREFS,
   viewModeVersion: VIEW_MODE_VERSION,
 };
 
@@ -76,7 +106,22 @@ export function moduleDescription(id: ModuleId): string {
  * (on by default, so a new section is never invisible to someone with saved
  * prefs). Also backfills `viewMode` for prefs saved before it existed.
  */
-function reconcile(stored: { modules: ClinicianModule[]; viewMode?: string; viewModeVersion?: number }): ClinicianPrefs {
+function reconcileChanges(stored: Partial<ChangesPrefs> | undefined): ChangesPrefs {
+  const known = new Set(CHANGE_METRICS.map((m) => m.key));
+  const compare = (["visit", "14", "30", "60"] as const).find((c) => c === stored?.compare) ?? DEFAULT_CHANGES_PREFS.compare;
+  const count = stored?.count === 5 ? 5 : 3;
+  const metrics = Array.isArray(stored?.metrics)
+    ? stored.metrics.filter((m) => known.has(m))
+    : DEFAULT_CHANGES_PREFS.metrics;
+  return { compare, count, metrics };
+}
+
+function reconcile(stored: {
+  modules: ClinicianModule[];
+  viewMode?: string;
+  viewModeVersion?: number;
+  changes?: Partial<ChangesPrefs>;
+}): ClinicianPrefs {
   const known = new Set(MODULE_META.map((m) => m.id));
   const seen = new Set<ModuleId>();
   const modules: ClinicianModule[] = [];
@@ -87,11 +132,11 @@ function reconcile(stored: { modules: ClinicianModule[]; viewMode?: string; view
     modules.push({ id: m.id, on: m.on !== false });
   }
   for (const meta of MODULE_META) {
-    if (!seen.has(meta.id)) modules.push({ id: meta.id, on: true });
+    if (!seen.has(meta.id)) modules.push({ id: meta.id, on: meta.defaultOn ?? true });
   }
   const current = stored.viewModeVersion === VIEW_MODE_VERSION;
   const viewMode: ViewMode = !current ? DEFAULT_CLINICIAN_PREFS.viewMode : stored.viewMode === "detailed" ? "detailed" : "quick";
-  return { modules, viewMode, viewModeVersion: VIEW_MODE_VERSION };
+  return { modules, viewMode, viewModeVersion: VIEW_MODE_VERSION, changes: reconcileChanges(stored.changes) };
 }
 
 /** v1 stored four booleans and no ordering. Map them onto the new list. */
@@ -121,7 +166,12 @@ export function loadClinicianPrefs(): ClinicianPrefs {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<ClinicianPrefs>;
-      if (Array.isArray(parsed?.modules)) return reconcile({ modules: parsed.modules, viewMode: parsed.viewMode, viewModeVersion: parsed.viewModeVersion });
+      if (Array.isArray(parsed?.modules)) return reconcile({
+        modules: parsed.modules,
+        viewMode: parsed.viewMode,
+        viewModeVersion: parsed.viewModeVersion,
+        changes: parsed.changes,
+      });
       return DEFAULT_CLINICIAN_PREFS;
     }
     const legacy = window.localStorage.getItem(LEGACY_KEY);

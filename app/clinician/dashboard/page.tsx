@@ -5,12 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "../../lib/api";
 import { useAuth } from "../../components/AuthProvider";
 import { ClinicianHeader } from "../../components/clinician/ClinicianHeader";
-import { StatCard } from "../../components/clinician/StatCard";
 import { SymptomFrequencyBars } from "../../components/clinician/SymptomFrequencyBars";
 import { MedAdherenceBars } from "../../components/clinician/MedAdherenceBars";
 import { RecentNotes } from "../../components/clinician/RecentNotes";
 import { InsightUnits } from "../../components/clinician/InsightUnits";
 import { GlanceLayer } from "../../components/clinician/GlanceLayer";
+import { WhatChanged } from "../../components/clinician/WhatChanged";
 import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
 import { RankedFlag, CalmCaregiverAlert } from "../../components/clinician/RankedFlag";
 import { WhatWentWellSummary } from "../../components/clinician/WhatWentWell";
@@ -118,18 +118,16 @@ function DashboardContent() {
   }
 
   const {
-    patient, clinical_summary, stats, symptom_frequency, symptom_series,
+    patient, clinical_summary, symptom_frequency, symptom_series,
     adherence_series, med_adherence, recent_notes, window: portalWindow, top_flag,
   } = portal;
 
-  // A patient with literally zero sleep logs ever gets no card at all, rather
-  // than a "No data" shell sitting alone — sections with nothing to say
-  // render nothing, per the same principle EmptyState applies elsewhere.
-  const hasSleepData = stats.avg_sleep.days_logged > 0;
+  // Narrowed (non-null) handle for renderModule's closure.
+  const loadedPortal = portal;
 
   /**
    * Modules render in the clinician's configured order (see /clinician/configure).
-   * The glance banner is deliberately not in this list — it is the five-second
+   * "What changed" is deliberately not in this list — it is the five-second
    * read the whole page is built around, and stays pinned above everything.
    */
   function renderModule(id: ModuleId) {
@@ -187,6 +185,10 @@ function DashboardContent() {
             </div>
           </div>
         );
+
+      case "averages":
+        // The former glance banner, kept as an optional section (off by default).
+        return <GlanceLayer portal={loadedPortal} showSleep />;
 
       case "rawNotes":
         return (
@@ -278,20 +280,9 @@ function DashboardContent() {
           </>
         ) : (
           <>
-            {/* Glance layer — full-width banner, the 5-second read. Never optional. */}
-            <GlanceLayer portal={portal} />
-
-            {hasSleepData && (
-              <StatCard
-                label="Avg Sleep"
-                value={stats.avg_sleep.hours != null ? `${stats.avg_sleep.hours}h` : "Insufficient data"}
-                sublabel={
-                  stats.avg_sleep.hours == null
-                    ? `${stats.avg_sleep.days_logged} of ${portalWindow.days} days logged`
-                    : undefined
-                }
-              />
-            )}
+            {/* What changed — pinned first; the read the page is built around.
+                Configured (comparison, count, metrics) in /clinician/configure. */}
+            <WhatChanged patientId={patientId} prefs={prefs.changes} />
 
             {/* Configurable modules, in the clinician's order. */}
             <div className={`space-y-6 transition-opacity ${dataLoading ? "opacity-50" : ""}`}>

@@ -12,9 +12,36 @@ import {
   moduleLabel,
   moduleDescription,
   DEFAULT_CLINICIAN_PREFS,
+  CHANGE_METRICS,
+  type ChangesPrefs,
   type ClinicianPrefs,
   type ViewMode,
 } from "../../lib/clinicianPrefs";
+
+const COMPARE_OPTIONS: { id: ChangesPrefs["compare"]; label: string }[] = [
+  { id: "visit", label: "Last appointment" },
+  { id: "14", label: "Last 2 weeks" },
+  { id: "30", label: "Last 30 days" },
+  { id: "60", label: "Last 60 days" },
+];
+
+function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors"
+      style={{
+        background: active ? "var(--cp-teal)" : "#fff",
+        color: active ? "#fff" : "var(--cp-text)",
+        borderColor: "var(--cp-border)",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 const VIEW_MODES: { id: ViewMode; label: string; description: string }[] = [
   { id: "detailed", label: "Detailed", description: "The full module dashboard configured below" },
@@ -76,6 +103,16 @@ export default function ClinicianConfigurePage() {
     setDirty(true);
   }, []);
 
+  const setChanges = useCallback((patch: Partial<ChangesPrefs>) => {
+    setPrefs((prev) => ({ ...prev, changes: { ...prev.changes, ...patch } }));
+    setDirty(true);
+  }, []);
+
+  function toggleMetric(key: string) {
+    const on = prefs.changes.metrics.includes(key);
+    setChanges({ metrics: on ? prefs.changes.metrics.filter((m) => m !== key) : [...prefs.changes.metrics, key] });
+  }
+
   function handleSave() {
     saveClinicianPrefs(prefs);
     setDirty(false);
@@ -136,6 +173,48 @@ export default function ClinicianConfigurePage() {
               </div>
             </button>
           ))}
+        </div>
+
+        <h2 className="text-sm font-bold uppercase tracking-wide mt-6" style={{ color: "var(--cp-text-muted)" }}>
+          What changed (top of Detailed view)
+        </h2>
+        <div
+          className="rounded-xl border mt-2 p-4 space-y-4"
+          style={{ background: "#fff", borderColor: "var(--cp-border)", opacity: prefs.viewMode === "quick" ? 0.5 : 1 }}
+        >
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Compare to</p>
+            <p className="text-xs" style={{ color: "var(--cp-text-muted)" }}>
+              Last appointment falls back to the last 30 days when there is no visit on record or it was under a week ago.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {COMPARE_OPTIONS.map((o) => (
+                <Pill key={o.id} active={prefs.changes.compare === o.id} onClick={() => setChanges({ compare: o.id })}>
+                  {o.label}
+                </Pill>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>How many changes</p>
+            <div className="flex gap-2 mt-2">
+              {([3, 5] as const).map((n) => (
+                <Pill key={n} active={prefs.changes.count === n} onClick={() => setChanges({ count: n })}>
+                  Top {n}
+                </Pill>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "var(--cp-text)" }}>Which metrics count</p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {CHANGE_METRICS.map((m) => (
+                <Pill key={m.key} active={prefs.changes.metrics.includes(m.key)} onClick={() => toggleMetric(m.key)}>
+                  {m.label}
+                </Pill>
+              ))}
+            </div>
+          </div>
         </div>
 
         <h2 className="text-sm font-bold uppercase tracking-wide mt-6" style={{ color: "var(--cp-text-muted)" }}>
@@ -225,7 +304,7 @@ export default function ClinicianConfigurePage() {
 
         {enabledCount === 0 && (
           <p className="text-xs mt-3" style={{ color: "var(--cp-amber)" }}>
-            Every section is hidden — the dashboard will show only the glance banner.
+            Every section is hidden — the dashboard will show only What changed.
           </p>
         )}
       </div>
