@@ -22,8 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal
 import models
-from services.aggregation import build_patient_aggregate, build_temporal_bins, TEMPORAL_WINDOW_DAYS
-from services.synthesis import generate_synthesis, generate_temporal_readouts
+from services.aggregation import build_patient_aggregate, build_temporal_bins, build_top_flag, TEMPORAL_WINDOW_DAYS
+from services.synthesis import generate_synthesis, generate_temporal_readouts, summarize_flag_note
 
 PATIENT_ID = int(os.getenv("SEED_PATIENT_ID", "0"))
 WINDOW_DAYS = int(os.getenv("SYNTHESIS_WINDOW_DAYS", "30"))
@@ -67,6 +67,16 @@ def main():
         temporal_result = generate_temporal_readouts(patient, temporal_bins, api_key)
         content["temporal_readouts"] = temporal_result["temporal_readouts"]
         content["validation_warnings"] = content["validation_warnings"] + temporal_result["validation_warnings"]
+
+        # One-sentence summary of each note that can be the caregiver alert,
+        # for every window the dashboard offers, keyed by note date.
+        flag_summaries = {}
+        for days in (14, 30, 90):
+            flag_agg = build_patient_aggregate(PATIENT_ID, window_days=days, db=db)
+            flag = build_top_flag(flag_agg["observation_periods"], flag_agg["symptom_stats"])
+            if flag and flag["date"] not in flag_summaries:
+                flag_summaries[flag["date"]] = summarize_flag_note(patient, flag["text"], api_key)
+        content["flag_summaries"] = flag_summaries
 
         if content["validation_warnings"]:
             print("VALIDATION WARNINGS — review before trusting this synthesis:")

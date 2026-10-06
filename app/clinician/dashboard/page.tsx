@@ -13,7 +13,7 @@ import { InsightUnits } from "../../components/clinician/InsightUnits";
 import { GlanceLayer } from "../../components/clinician/GlanceLayer";
 import { TrajectoryStrip } from "../../components/clinician/TrajectoryStrip";
 import { RankedFlag, CalmCaregiverAlert } from "../../components/clinician/RankedFlag";
-import { WhatWentWell, WhatWentWellSummary } from "../../components/clinician/WhatWentWell";
+import { WhatWentWellSummary } from "../../components/clinician/WhatWentWell";
 import { CustomizeControl } from "../../components/clinician/CustomizeControl";
 import { QuickView } from "../../components/clinician/QuickView";
 import {
@@ -146,7 +146,12 @@ function DashboardContent() {
             </div>
             <div>
               <SectionTitle>What Went Well</SectionTitle>
-              <WhatWentWell items={clinical_summary?.what_went_well ?? []} />
+              <WhatWentWellSummary
+                summary={clinical_summary?.what_went_well_summary}
+                items={clinical_summary?.what_went_well ?? []}
+                onReveal={revealNotes}
+                showTitle={false}
+              />
             </div>
           </div>
         );

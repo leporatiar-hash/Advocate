@@ -6,6 +6,10 @@ function fmtDate(dateStr: string) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function flagSummary(topFlag: TopFlag): string {
+  return topFlag.summary || `A caregiver note logged ${fmtDate(topFlag.date)} was flagged as the highest-severity entry this period.`;
+}
+
 // Only the single highest-severity note this period gets the red treatment —
 // every other flagged metric stays in Supporting Data / Raw Notes so red
 // keeps meaning "the one thing to look at first."
@@ -20,6 +24,7 @@ export function RankedFlag({ topFlag, patientId }: { topFlag: TopFlag | null; pa
     );
   }
 
+  // Summary, never the raw note: the verbatim text is one click away.
   return (
     <Link
       href={`/clinician/log/?patient_id=${patientId}&date=${topFlag.date}`}
@@ -29,15 +34,8 @@ export function RankedFlag({ topFlag, patientId }: { topFlag: TopFlag | null; pa
       <p className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--cp-red)" }}>
         Highest-severity note · {fmtDate(topFlag.date)}
       </p>
-      {/* text and quote are always the same caregiver note verbatim — shown
-          once, as a quote, rather than duplicated as a synthesized lead-in
-          plus a repeated quote below it. */}
-      <p
-        className="text-sm italic mt-2 pl-3"
-        style={{ color: "var(--cp-text)", borderLeft: "2px solid var(--cp-red)" }}
-      >
-        &ldquo;{topFlag.quote ?? topFlag.text}&rdquo;
-      </p>
+      <p className="text-sm mt-2" style={{ color: "var(--cp-text)" }}>{flagSummary(topFlag)}</p>
+      <p className="text-xs font-semibold mt-3" style={{ color: "var(--cp-red)" }}>Read caregiver note ›</p>
     </Link>
   );
 }
@@ -59,9 +57,8 @@ export function CalmCaregiverAlert({ topFlag, patientId }: { topFlag: TopFlag | 
           <p className="text-xs font-semibold" style={{ color: "var(--cp-text-muted)" }}>
             Caregiver note · {fmtDate(topFlag.date)}
           </p>
-          <p className="text-sm italic mt-1.5" style={{ color: "var(--cp-text)" }}>
-            &ldquo;{topFlag.quote ?? topFlag.text}&rdquo;
-          </p>
+          <p className="text-sm mt-1.5" style={{ color: "var(--cp-text)" }}>{flagSummary(topFlag)}</p>
+          <p className="text-xs font-semibold mt-2" style={{ color: "var(--cp-teal)" }}>Read caregiver note ›</p>
         </Link>
       ) : (
         <div className="rounded-2xl px-5 py-4" style={{ background: "#fff", border: "1px solid var(--cp-border)" }}>

@@ -274,6 +274,12 @@ def get_clinician_portal(
             "window_days": synthesis_row.window_days,
         }
 
+    # Caregiver alert shows the cached one-sentence summary, never the raw
+    # note — the verbatim text stays one click away on the log page.
+    if top_flag:
+        summaries = (clinical_summary or {}).get("flag_summaries") or {}
+        top_flag = {**top_flag, "summary": summaries.get(top_flag["date"])}
+
     # Every insight's "N notes" affordance has to actually reveal its source, so
     # any date an insight cites must appear in recent_notes even if it falls
     # outside the usual top-5-most-recent — otherwise source-linking would

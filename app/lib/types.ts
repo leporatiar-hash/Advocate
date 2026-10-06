@@ -512,6 +512,9 @@ export interface TopFlag {
   date: string;
   text: string;
   quote: string | null;
+  /** One-sentence AI summary shown instead of the raw note (null until the
+   * synthesis has been generated for this note). */
+  summary?: string | null;
   note_id: string | null;
 }
 

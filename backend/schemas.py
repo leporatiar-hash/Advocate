@@ -479,6 +479,7 @@ class ClinicalSummary(BaseModel):
     insights: List[InsightUnit]
     what_went_well: List[WhatWentWellItem] = []
     what_went_well_summary: str = ""
+    flag_summaries: Dict[str, str] = {}
     generated_at: datetime
     window_days: int
     validation_warnings: List[str] = []
@@ -541,6 +542,7 @@ class TopFlag(BaseModel):
     date: date
     text: str
     quote: Optional[str] = None
+    summary: Optional[str] = None
     note_id: Optional[str] = None
 
 

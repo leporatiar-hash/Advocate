@@ -49,19 +49,24 @@ export function WhatWentWellSummary({
   summary,
   items,
   onReveal,
+  showTitle = true,
 }: {
   summary: string | undefined;
   items: WhatWentWellItem[];
   onReveal: (dates: string[]) => void;
+  /** False where the page already supplies a section title. */
+  showTitle?: boolean;
 }) {
   const dates = [...new Set(items.map((i) => i.date))].sort();
   return (
-    <div>
-      <h2 className="text-sm font-bold uppercase tracking-wide mb-2" style={{ color: "var(--cp-text-muted)" }}>
-        What went well
-      </h2>
+    <div className="h-full">
+      {showTitle && (
+        <h2 className="text-sm font-bold uppercase tracking-wide mb-2" style={{ color: "var(--cp-text-muted)" }}>
+          What went well
+        </h2>
+      )}
       {summary && items.length ? (
-        <div className="rounded-2xl p-5" style={{ background: "#fff", border: "1px solid var(--cp-border)" }}>
+        <div className="rounded-2xl p-5 h-full" style={{ background: "#fff", border: "1px solid var(--cp-border)" }}>
           <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap">
             <p className="text-sm leading-relaxed flex-1" style={{ color: "var(--cp-text)" }}>{summary}</p>
             <button

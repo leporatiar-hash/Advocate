@@ -307,6 +307,35 @@ def generate_synthesis(patient, agg: dict, db: Session, api_key: str, model: str
     }
 
 
+# ── Caregiver alert summary ─────────────────────────────────────────────────
+# The clinician never lands on a raw caregiver note: the caregiver alert shows
+# one attributed sentence, with the verbatim note one click away. Made only by
+# scripts/generate_synthesis.py, never on the portal's GET path.
+FLAG_SUMMARY_SYSTEM_PROMPT = (
+    "You summarize one caregiver note about a patient for a psychiatrist, in ONE "
+    "plain sentence under 25 words. ATTRIBUTE, NEVER DIAGNOSE: write what the "
+    "caregiver reported (\"Caregiver reports...\"), never a clinical label or "
+    "conclusion. Refer to the patient by first name. Keep the most important "
+    "concrete facts. No counts of occurrences, no em dashes, no recommendations, "
+    "no speculation beyond the note. Return ONLY JSON: {\"summary\": \"...\"}"
+)
+
+
+def summarize_flag_note(patient, note_text: str, api_key: str, model: str = None) -> str:
+    first_name = (patient.name or "").split(" ")[0] or "the patient"
+    client = OpenAI(api_key=api_key)
+    completion = client.chat.completions.create(
+        model=model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": FLAG_SUMMARY_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Patient first name: {first_name}\n\nCaregiver note:\n{note_text}"},
+        ],
+    )
+    data = json.loads((completion.choices[0].message.content or "").strip())
+    return (data.get("summary") or "").strip().replace("\u2014", ",")
+
+
 # ── Temporal Data bin readouts ───────────────────────────────────────────────
 # One call per bin-with-notes, made only by scripts/generate_synthesis.py —
 # never on the portal's GET path. note_severity rates the notes only; the
