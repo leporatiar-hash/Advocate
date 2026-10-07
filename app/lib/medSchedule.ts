@@ -130,3 +130,40 @@ export function withAdherenceDoses<L extends { date: string; medications_taken: 
 ): L[] {
   return logs.map(l => ({ ...l, medications_taken: adherenceEntries(l.medications_taken, meds, l.date) }));
 }
+
+// ── Usual dose times ─────────────────────────────────────────────────────────
+// Stored in Medication.time_of_day as a comma list, e.g. "morning,night,after_meals".
+// Older meds hold a single word ("Morning", "noon", "evening"), which parses the same way.
+
+export const DOSE_SLOTS = [
+  { key: "morning", label: "Morning", time: "08:00" },
+  { key: "afternoon", label: "Afternoon", time: "13:00" },
+  { key: "evening", label: "Evening", time: "18:00" },
+  { key: "night", label: "Night", time: "21:00" },
+] as const;
+export type DoseSlot = (typeof DOSE_SLOTS)[number];
+export const AFTER_MEALS = "after_meals";
+
+const SLOT_ALIASES: Record<string, string> = { noon: "afternoon", midday: "afternoon", bedtime: "night" };
+
+export function parseDoseTimes(timeOfDay: string | null | undefined): { slots: DoseSlot[]; afterMeals: boolean } {
+  const parts = (timeOfDay ?? "").split(",").map(p => p.trim().toLowerCase()).filter(Boolean);
+  const keys = new Set(parts.map(p => SLOT_ALIASES[p] ?? p));
+  return {
+    slots: DOSE_SLOTS.filter(s => keys.has(s.key)),
+    afterMeals: keys.has(AFTER_MEALS) || keys.has("after meals") || keys.has("with meals"),
+  };
+}
+
+export function serializeDoseTimes(slotKeys: string[], afterMeals: boolean): string {
+  const ordered = DOSE_SLOTS.filter(s => slotKeys.includes(s.key)).map(s => s.key);
+  return [...ordered, ...(afterMeals ? [AFTER_MEALS] : [])].join(",");
+}
+
+// "Morning & Night · after meals"
+export function doseTimesLabel(timeOfDay: string | null | undefined): string {
+  const { slots, afterMeals } = parseDoseTimes(timeOfDay);
+  const names = slots.map(s => s.label);
+  const when = names.length <= 2 ? names.join(" & ") : `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+  return [when, afterMeals ? (when ? "after meals" : "After meals") : ""].filter(Boolean).join(" · ");
+}

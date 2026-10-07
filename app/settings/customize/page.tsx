@@ -335,7 +335,7 @@ export default function CustomizePage() {
         </div>
 
         {/* ── Medications ── */}
-        <Section title="Medications" subtitle="Tap a medication to change its dose or how often it's taken">
+        <Section title="Medications" subtitle="Each medication has its own schedule: how often and what times. Tap Edit to change one.">
           {patient ? (
             <MedicationManager
               patientId={patient.id}
@@ -350,7 +350,7 @@ export default function CustomizePage() {
         </Section>
 
         {/* ── Dose Timing ── */}
-        <Section title="Dose Timing" subtitle="How do you want to log when medications are taken?">
+        <Section title="Daily Log Style" subtitle="How the daily log asks about doses. Applies to every medication; each one's schedule and times are set above.">
           <div className="space-y-3">
             {(["quick", "simple", "exact"] as const).map(mode => (
               <button
@@ -375,10 +375,10 @@ export default function CustomizePage() {
                   </p>
                   <p className="text-sm text-slate-500 mt-0.5">
                     {mode === "quick"
-                      ? "“Took all meds today” · Yes or No"
+                      ? "One question: “Took all meds today?” Yes or No"
                       : mode === "simple"
-                      ? "Morning · Afternoon · Evening · Night"
-                      : "Pick the precise time for each dose"}
+                      ? "Tap each medication's times (Morning, Night…)"
+                      : "Pick the precise clock time for each dose"}
                   </p>
                 </div>
               </button>

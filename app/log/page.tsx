@@ -11,7 +11,7 @@ import { StepLoader } from "../components/StepLoader";
 import Link from "next/link";
 import { MedicationManager } from "../components/MedicationForm";
 import { DictationButton } from "../components/DictationButton";
-import { formatShortDate, isAsNeeded, isDue, nextDueDate, scheduleLabel } from "../lib/medSchedule";
+import { doseTimesLabel, formatShortDate, isAsNeeded, isDue, nextDueDate, parseDoseTimes, scheduleLabel } from "../lib/medSchedule";
 import { customReadings, normalizeCustomVitals, vitalLabel } from "../lib/customVitals";
 import type { CustomVitalReading, Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome } from "../lib/types";
 import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS } from "../lib/constants";
@@ -1517,6 +1517,9 @@ function LogPageInner() {
             const doseOpen = addDoseOpenFor === med.id;
             const prn = isAsNeeded(med);
             const offDay = !prn && !isDue(med, draft.date);
+            const medSlots = parseDoseTimes(med.time_of_day).slots;
+            const slotTimes = new Set<string>(prn ? [] : medSlots.map(s => s.time));
+            const extraDoses = doses.filter(d => !d.time_taken || !slotTimes.has(d.time_taken));
 
             return (
               <div key={med.id} className="space-y-3" style={offDay && doses.length === 0 ? { opacity: 0.75 } : undefined}>
@@ -1535,7 +1538,7 @@ function LogPageInner() {
                     ) : offDay ? (
                       <p className="text-sm text-slate-400">{offDayNote(med)}</p>
                     ) : (
-                      <p className="text-sm text-slate-400">{[med.time_of_day, "not logged yet"].filter(Boolean).join(" · ")}</p>
+                      <p className="text-sm text-slate-400">{[doseTimesLabel(med.time_of_day), "not logged yet"].filter(Boolean).join(" · ")}</p>
                     )}
                   </div>
                   <button
@@ -1550,10 +1553,29 @@ function LogPageInner() {
                   </button>
                 </div>
 
-                {/* Logged dose chips with remove */}
-                {doses.length > 0 && (
+                {/* One-tap buttons for this med's usual times (set per med in Settings) */}
+                {!prn && medSlots.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {doses.map((d, i) => (
+                    {medSlots.map(slot => {
+                      const given = doses.some(d => d.time_taken === slot.time);
+                      return (
+                        <button key={slot.key} type="button" aria-pressed={given}
+                          onClick={() => given ? removeDose(med.id, slot.time) : confirmDoseSimple(med.id, slot.time)}
+                          className="px-3.5 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95"
+                          style={given
+                            ? { borderColor: "#4a7c59", background: "#4a7c59", color: "white" }
+                            : { borderColor: offDay ? "#E2E8F0" : "#d4e0d7", background: "white", color: offDay ? "#94A3B8" : "#4a7c59" }}>
+                          {given ? `✓ ${slot.label}` : slot.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Logged dose chips with remove (doses outside the usual times) */}
+                {extraDoses.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {extraDoses.map((d, i) => (
                       <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium"
                         style={{ background: "#e8f0eb", color: "#065F46" }}>
                         {displayDoseTime(d.time_taken)}
