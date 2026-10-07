@@ -8,22 +8,16 @@ import { withAdherenceDoses } from "../lib/medSchedule";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import {
-  buildMetricRows, filterByTimeframe,
+  buildMetricRows, filterByTimeframe, formatValue, metricDomain, severityWord,
   type MetricRow, type MetricPoint, type Timeframe,
 } from "../lib/insights";
+import { TimeframeToggle, periodLabel } from "../components/TimeframeToggle";
+import { lora, serif, WARM } from "../lib/warmTheme";
 import type { Patient, DailyLog, AssessmentStatusItem } from "../lib/types";
 import MetricDetailClient from "./[metric]/MetricDetailClient";
 import { Sparkline } from "../components/Sparkline";
 
 const NUDGE_DISMISSED_KEY = "truefit_assessments_nudge_dismissed";
-
-// ── Severity color ────────────────────────────────────────────────────────────
-
-function severityColor(value: number): string {
-  if (value >= 8) return "#EA580C";
-  if (value >= 4) return "#D97706";
-  return "#16A34A";
-}
 
 // ── Window change (first half avg → second half avg) ─────────────────────────
 
@@ -37,38 +31,6 @@ function computeWindowChange(points: MetricPoint[]): number | null {
   const secondAvg = second.reduce((s, p) => s + p.value, 0) / second.length;
   const diff = secondAvg - firstAvg;
   return Math.abs(diff) < 0.05 ? 0 : diff;
-}
-
-// ── Time toggle ───────────────────────────────────────────────────────────────
-
-function TimeframeToggle({
-  current,
-  onChange,
-  activeColor = "#4a7c59",
-}: {
-  current: Timeframe;
-  onChange: (tf: Timeframe) => void;
-  activeColor?: string;
-}) {
-  const options: Timeframe[] = ["1W", "1M", "3M", "1Y"];
-  return (
-    <div className="flex gap-1 rounded-xl p-1" style={{ background: "#F1F5F9" }}>
-      {options.map((tf) => (
-        <button
-          key={tf}
-          onClick={() => onChange(tf)}
-          className="flex-1 py-2 rounded-lg text-sm font-bold transition-all"
-          style={
-            current === tf
-              ? { background: "white", color: activeColor, border: `1.5px solid ${activeColor}` }
-              : { background: "transparent", color: "#64748B" }
-          }
-        >
-          {tf}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 // ── Summary prose ─────────────────────────────────────────────────────────────
@@ -144,76 +106,75 @@ function buildSummaryProse(
     : "Not enough logs in this period to show a summary.";
 }
 
-// ── Symptom card ──────────────────────────────────────────────────────────────
+// ── Metric row ────────────────────────────────────────────────────────────────
 
-function SymptomCard({
-  row,
-  timeframe,
-  onSelect,
-  isLast,
+// One line per metric: name and where it stands now, a sparkline on a fixed
+// scale (so a 0→1 blip stays a blip), and the change across the period in
+// words-and-arrows. Text stays in ink colors; only the arrow carries
+// better/worse color.
+function MetricListRow({
+  row, timeframe, onSelect, isLast,
 }: {
-  row: MetricRow;
-  timeframe: Timeframe;
-  onSelect: () => void;
-  isLast: boolean;
+  row: MetricRow; timeframe: Timeframe; onSelect: () => void; isLast: boolean;
 }) {
-  const windowPoints = filterByTimeframe(row.allPoints, timeframe);
-  const latestInWindow = windowPoints.length > 0 ? windowPoints[windowPoints.length - 1].value : null;
-  const change = computeWindowChange(windowPoints);
+  const points = filterByTimeframe(row.allPoints, timeframe);
+  const latest = points.length ? points[points.length - 1].value : null;
+  const change = computeWindowChange(points);
+  const threshold = row.unit === "%" ? 2 : 0.3;
+  const moved = change !== null && Math.abs(change) >= threshold;
+  const better = moved && ((change! > 0) === row.higherIsBetter);
 
-  const dotColor = latestInWindow !== null ? severityColor(latestInWindow) : "#E2E8F0";
-  const isWorsening = change !== null && change > 0.3;
-  const isImproving = change !== null && change < -0.3;
-  const sparkColor = latestInWindow !== null ? severityColor(latestInWindow) : "#B4B2A9";
-
-  const deltaText =
-    change === null || Math.abs(change) < 0.3
-      ? "—"
-      : `${change > 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(1)}`;
-  const deltaColor =
-    change === null || Math.abs(change) < 0.3
-      ? "#94A3B8"
-      : change > 0
-      ? "#EA580C"
-      : "#16A34A";
-
-  const borderStyle = isLast ? undefined : { borderBottom: "0.5px solid #F1F5F9" };
-
-  if (windowPoints.length === 0) {
-    return (
-      <button
-        type="button"
-        onClick={onSelect}
-        className="w-full flex items-center gap-3 px-5 py-4 text-left active:bg-slate-50"
-        style={borderStyle}
-      >
-        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: "#E2E8F0" }} />
-        <p className="flex-1 min-w-0 text-base font-semibold text-navy truncate">{row.label}</p>
-        <p className="text-sm text-slate-400 flex-shrink-0">No data</p>
-        <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#CBD5E1" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-      </button>
-    );
-  }
+  const nowText = latest === null
+    ? "No entries in this period"
+    : row.unit === "/10"
+      ? `${severityWord(latest)} · ${latest.toFixed(0)}/10 now`
+      : `${formatValue(latest, row.unit)} now`;
+  const changeText = !moved ? "Steady"
+    : row.unit === "%" ? `${Math.abs(change!).toFixed(0)}%`
+    : row.unit === "hrs" ? `${Math.abs(change!).toFixed(1)}h`
+    : Math.abs(change!).toFixed(1);
 
   return (
     <button
       type="button"
       onClick={onSelect}
-      className="w-full flex items-center gap-3 px-5 py-4 text-left transition-colors active:bg-slate-50"
-      style={borderStyle}
+      className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[#f7faf8] active:bg-[#eef4f0]"
+      style={isLast ? undefined : { borderBottom: `1px solid ${WARM.rule}` }}
     >
-      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: dotColor }} />
-      <p className="flex-1 min-w-0 text-base font-semibold text-navy truncate">{row.label}</p>
-      <Sparkline points={windowPoints} color={sparkColor} />
-      <p className="text-sm font-semibold flex-shrink-0 min-w-[44px] text-right" style={{ color: deltaColor }}>
-        {deltaText}
+      <div className="flex-1 min-w-0">
+        <p className="text-base font-semibold truncate" style={{ color: WARM.ink }}>{row.label}</p>
+        <p className="text-sm mt-0.5 truncate" style={{ color: WARM.inkSoft }}>{nowText}</p>
+      </div>
+      {points.length > 0 && (
+        <Sparkline points={points} color={WARM.sage} domain={metricDomain(row.unit, row.allPoints)} width={64} endDot />
+      )}
+      <p className="text-sm font-semibold flex-shrink-0 w-[60px] text-right" style={{ color: WARM.ink }}>
+        {moved && (
+          <span style={{ color: better ? WARM.better : WARM.worse }} aria-hidden="true">{change! > 0 ? "↑ " : "↓ "}</span>
+        )}
+        <span className={moved ? "" : "font-normal"} style={moved ? undefined : { color: WARM.inkSoft }}>{changeText}</span>
+        {moved && <span className="sr-only">{change! > 0 ? " up" : " down"}{better ? ", better" : ", worse"}</span>}
       </p>
-      <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#CBD5E1" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#b8c7bd" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
       </svg>
     </button>
+  );
+}
+
+function MetricGroup({ title, rows, timeframe, onSelect }: {
+  title: string; rows: MetricRow[]; timeframe: Timeframe; onSelect: (key: string) => void;
+}) {
+  if (!rows.length) return null;
+  return (
+    <section className="space-y-2">
+      <h2 className="text-base px-1" style={{ ...serif, color: WARM.forest, fontWeight: 500 }}>{title}</h2>
+      <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: `1px solid ${WARM.rule}` }}>
+        {rows.map((r, i) => (
+          <MetricListRow key={r.key} row={r} timeframe={timeframe} onSelect={() => onSelect(r.key)} isLast={i === rows.length - 1} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -293,17 +254,17 @@ export default function InsightsPage() {
     [metricRows]
   );
 
+  const routineRows = useMemo(
+    () => ["sleep", "adherence-overall"]
+      .map((k) => metricRows.find((r) => r.key === k))
+      .filter((r): r is MetricRow => !!r && r.allPoints.length > 0),
+    [metricRows]
+  );
+
   const summaryProse = useMemo(
     () => buildSummaryProse(symptomRows, metricRows, timeframe),
     [symptomRows, metricRows, timeframe]
   );
-
-  const dominantSeverityColor = useMemo(() => {
-    const pts = symptomRows.flatMap((r) => filterByTimeframe(r.allPoints, timeframe));
-    if (!pts.length) return "#4a7c59";
-    const avg = pts.reduce((s, p) => s + p.value, 0) / pts.length;
-    return avg >= 8 ? "#EA580C" : avg >= 4 ? "#D97706" : "#16A34A";
-  }, [symptomRows, timeframe]);
 
   if (isLoading || dataLoading) {
     return (
@@ -317,7 +278,7 @@ export default function InsightsPage() {
   }
 
   return (
-    <div className="min-h-screen pb-28" style={{ background: "#faf9f6" }}>
+    <div className={`${lora.variable} min-h-screen pb-28`} style={{ background: WARM.cream }}>
       {selectedMetric && (
         <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: "#faf9f6" }}>
           <MetricDetailClient metricKey={selectedMetric} onBack={() => setSelectedMetric(null)} />
@@ -325,73 +286,56 @@ export default function InsightsPage() {
       )}
       <NavBar />
 
-      <div className="max-w-lg mx-auto pt-6 px-4 space-y-4">
+      <div className="max-w-lg mx-auto pt-6 px-4 space-y-6">
 
-        {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-navy">Insights</h1>
-          {patient && (
-            <p className="text-base text-slate-500 mt-1">{patient.name}</p>
-          )}
+          <h1 className="text-3xl" style={{ ...serif, color: WARM.ink, fontWeight: 500 }}>Insights</h1>
+          {patient && <p className="text-base mt-1" style={{ color: WARM.inkSoft }}>How {patient.name} has been doing</p>}
         </div>
 
         {/* Assessments nudge */}
         {dueAssessments.length > 0 && !nudgeDismissed && (
-          <div className="bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <Link href="/assessments" className="text-base font-semibold text-navy">
-                {dueAssessments.length} monthly check-in{dueAssessments.length > 1 ? "s" : ""} available
-              </Link>
-            </div>
+          <div className="bg-white rounded-2xl px-4 py-3.5 shadow-sm flex items-center gap-3" style={{ border: `1px solid ${WARM.rule}` }}>
+            <Link href="/assessments" className="flex-1 min-w-0">
+              <p className="text-base font-semibold" style={{ color: WARM.ink }}>
+                {dueAssessments.length} monthly check-in{dueAssessments.length > 1 ? "s" : ""} ready
+              </p>
+              <p className="text-sm" style={{ color: WARM.inkSoft }}>A few minutes each · <span style={{ color: WARM.sage, fontWeight: 600 }}>Start ›</span></p>
+            </Link>
             <button
               type="button"
               onClick={dismissNudge}
               aria-label="Dismiss"
-              className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 flex-shrink-0"
+              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 hover:bg-slate-50"
+              style={{ color: WARM.inkSoft }}
             >
               ×
             </button>
           </div>
         )}
 
-        {/* Time toggle */}
-        <TimeframeToggle current={timeframe} onChange={setTimeframe} activeColor={dominantSeverityColor} />
+        <TimeframeToggle current={timeframe} onChange={setTimeframe} />
 
         {metricRows.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center">
-            <p className="text-lg font-semibold text-navy">No data yet</p>
-            <p className="text-base text-slate-500 mt-2">
-              Start logging daily to see trends and patterns here.
+          <div className="rounded-3xl p-8 text-center" style={{ background: WARM.warm, border: `1px solid ${WARM.warmBorder}` }}>
+            <p className="text-lg" style={{ ...serif, color: WARM.forest, fontWeight: 500 }}>Nothing to show yet</p>
+            <p className="text-base mt-2" style={{ color: WARM.inkSoft }}>
+              Trends and patterns appear here once you&apos;ve logged a few days.
             </p>
-            <Link
-              href="/log"
-              className="inline-block mt-5 px-6 py-3 rounded-2xl text-white font-semibold text-base"
-              style={{ background: "#4a7c59" }}
-            >
-              Log Today
+            <Link href="/log" className="inline-block mt-5 px-6 py-3 rounded-2xl text-white font-semibold text-base" style={{ background: WARM.sage }}>
+              Log today
             </Link>
           </div>
         ) : (
           <>
-            {/* Summary card */}
-            <div className="bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100">
-              <p className="text-base text-slate-700 leading-relaxed">{summaryProse}</p>
+            {/* Plain-language summary of the period */}
+            <div className="rounded-3xl px-5 py-4" style={{ background: WARM.warm, border: `1px solid ${WARM.warmBorder}` }}>
+              <p className="text-sm" style={{ color: WARM.inkSoft }}>{periodLabel(timeframe)}</p>
+              <p className="text-base leading-relaxed mt-1" style={{ color: WARM.ink }}>{summaryProse}</p>
             </div>
 
-            {/* Symptom grid */}
-            {symptomRows.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                {symptomRows.map((r, i) => (
-                  <SymptomCard
-                    key={r.key}
-                    row={r}
-                    timeframe={timeframe}
-                    onSelect={() => setSelectedMetric(r.key)}
-                    isLast={i === symptomRows.length - 1}
-                  />
-                ))}
-              </div>
-            )}
+            <MetricGroup title="Symptoms" rows={symptomRows} timeframe={timeframe} onSelect={setSelectedMetric} />
+            <MetricGroup title="Sleep & medications" rows={routineRows} timeframe={timeframe} onSelect={setSelectedMetric} />
           </>
         )}
       </div>

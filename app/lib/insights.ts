@@ -441,3 +441,24 @@ export function formatChange(change: number | null, unit: string, higherIsBetter
 
   return { text, color, direction: up ? "up" : "down" };
 }
+
+// Fixed y-scale per kind of metric, so a chart never stretches a small change
+// to fill the box and sleep/adherence aren't drawn on the 0–10 symptom scale.
+export function metricDomain(unit: string, points: MetricPoint[] = []): [number, number] {
+  if (unit === "/10") return [0, 10];
+  if (unit === "%") return [0, 100];
+  if (unit === "hrs") return [0, Math.max(12, Math.ceil(Math.max(0, ...points.map(p => p.value)) / 4) * 4)];
+  if (unit === "days") return [0, 1];
+  const vals = points.map(p => p.value);
+  if (!vals.length) return [0, 1];
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  return lo === hi ? [lo - 1, hi + 1] : [lo, hi];
+}
+
+// Plain-word level for a 0–10 symptom score; same bands as the rest of the app.
+export function severityWord(v: number): string {
+  if (v <= 0) return "None";
+  if (v >= 8) return "Severe";
+  if (v >= 4) return "Moderate";
+  return "Mild";
+}

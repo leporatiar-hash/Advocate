@@ -3,17 +3,11 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Lora } from "next/font/google";
+import { lora, serif, WARM as C } from "../lib/warmTheme";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { api } from "../lib/api";
 import type { Patient } from "../lib/types";
-
-// Same serif and palette as the login page, so Settings feels like the same
-// app rather than a generic admin screen.
-const lora = Lora({ subsets: ["latin"], variable: "--font-lora", weight: ["400", "500", "600"], display: "swap" });
-const C = { sage: "#4a7c59", forest: "#2d4f38", ink: "#1a2420", inkSoft: "#6b7d74", rule: "#e3ebe5", sagePale: "#e8f0eb", warm: "#f4efe6" };
-const serif = { fontFamily: "var(--font-lora), Georgia, serif" };
 
 // Thin line icons in the brand green, no tinted tiles behind them.
 const ICONS: Record<string, string> = {

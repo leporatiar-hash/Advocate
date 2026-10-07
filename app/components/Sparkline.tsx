@@ -1,7 +1,11 @@
 import type { MetricPoint } from "../lib/insights";
 
-export function Sparkline({ points, color }: { points: MetricPoint[]; color: string }) {
-  const W = 56, H = 24, P = 2;
+// `domain` pins the y-scale (e.g. 0–10) so small changes aren't stretched to
+// fill the box; without it the line spans its own min–max.
+export function Sparkline({ points, color, domain, width = 56, endDot = false }: {
+  points: MetricPoint[]; color: string; domain?: [number, number]; width?: number; endDot?: boolean;
+}) {
+  const W = width, H = 24, P = 3;
   if (points.length < 2) {
     return (
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0">
@@ -10,7 +14,7 @@ export function Sparkline({ points, color }: { points: MetricPoint[]; color: str
     );
   }
   const vals = points.map((p) => p.value);
-  const minV = Math.min(...vals), maxV = Math.max(...vals);
+  const minV = domain ? domain[0] : Math.min(...vals), maxV = domain ? domain[1] : Math.max(...vals);
   const range = maxV - minV || 1;
   const xs = points.map((_, i) => P + (i / (points.length - 1)) * (W - P * 2));
   const ys = points.map((p) => H - P - ((p.value - minV) / range) * (H - P * 2));
@@ -18,6 +22,7 @@ export function Sparkline({ points, color }: { points: MetricPoint[]; color: str
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0">
       <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      {endDot && <circle cx={xs[xs.length - 1]} cy={ys[ys.length - 1]} r={2.5} fill={color} />}
     </svg>
   );
 }
