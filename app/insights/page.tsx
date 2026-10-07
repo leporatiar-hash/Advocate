@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "../lib/api";
+import { withAdherenceDoses } from "../lib/medSchedule";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import {
@@ -237,7 +238,8 @@ export default function InsightsPage() {
       const p = patients[0];
       setPatient(p);
       const logsData = (await api.getLogs(p.id)) as DailyLog[];
-      setLogs(logsData);
+      // Off-day and as-needed entries aren't misses (see lib/medSchedule.ts).
+      setLogs(withAdherenceDoses(logsData, p.medications));
       api.getAssessmentStatus(p.id)
         .then((status) => setDueAssessments((status as AssessmentStatusItem[]).filter((s) => s.due)))
         .catch(() => {});

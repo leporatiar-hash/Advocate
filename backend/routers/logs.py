@@ -7,6 +7,7 @@ from database import get_db
 import models
 import schemas
 from auth import get_current_user, require_not_clinician
+from services.med_schedule import is_due
 
 router = APIRouter()
 
@@ -245,7 +246,7 @@ def quick_log(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_not_clinician),
 ):
-    _verify_patient(patient_id, current_user, db)
+    patient = _verify_patient(patient_id, current_user, db)
 
     if body.type == "nothing_notable":
         fields: dict = {"log_type": "nothing_notable"}
@@ -276,8 +277,17 @@ def quick_log(
             )
 
         if previous:
+            # Only carry forward doses for meds due on the new date: yesterday's
+            # every-other-day dose isn't today's, and an as-needed dose is a
+            # one-off, never a routine to repeat.
+            meds_by_id = {m.id: m for m in patient.medications}
+            carried_doses = [
+                e for e in (previous.medications_taken or [])
+                if e.get("medication_id") not in meds_by_id
+                or is_due(meds_by_id[e["medication_id"]], body.date)
+            ]
             fields = {
-                "medications_taken": previous.medications_taken,
+                "medications_taken": carried_doses,
                 "symptoms": previous.symptoms,
                 "medication_side_effects": previous.medication_side_effects,
                 "sleep_hours": previous.sleep_hours,

@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 import models
+from services.med_schedule import as_needed_usage, is_as_needed, log_adherence_doses, log_doses
 
 # Exact-match preset buttons the log UI writes (80/48/24oz), not a continuous scale.
 HYDRATION_LABELS = {80: "Good", 48: "Fair", 24: "Poor"}
@@ -157,14 +158,15 @@ def symptom_tier(name: str) -> str:
 
 
 def _calculate_adherence(logs, medications) -> dict:
+    # As-needed meds have no expected doses, so no adherence — their use is
+    # reported separately by as_needed_usage.
     med_stats = {
         med.id: {"name": med.name, "taken": 0, "total": 0, "missed_dates": []}
         for med in medications
+        if not is_as_needed(med)
     }
     for log in logs:
-        if not log.medications_taken:
-            continue
-        for entry in log.medications_taken:
+        for entry in log_adherence_doses(log):
             mid = entry.get("medication_id")
             if mid in med_stats:
                 med_stats[mid]["total"] += 1
@@ -204,11 +206,69 @@ def group_observation_periods(logs) -> list:
             "notes": log.notes,
             "episode": log.episode,
             "symptoms": log.symptoms,
-            "medications_taken": log.medications_taken,
+            "medications_taken": log_doses(log),
             "log_type": log.log_type,
             "repeated_dates": [],
         })
     return groups
+
+
+def custom_vital_readings(log) -> dict:
+    """name -> {value, unit} for the caregiver-defined vitals on one log
+    (stored under vitals.custom by the daily log), blanks skipped."""
+    custom = (log.vitals or {}).get("custom") or {}
+    out = {}
+    for name, reading in custom.items():
+        if isinstance(reading, dict):
+            value, unit = reading.get("value"), reading.get("unit")
+        else:
+            value, unit = reading, None
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        out[name] = {"value": value.strip() if isinstance(value, str) else value, "unit": unit or None}
+    return out
+
+
+def _numeric(value) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        return None
+
+
+def build_custom_vital_stats(logs) -> dict:
+    """Per custom vital: every reading with its date, the latest one, and
+    min/max/avg over the readings that are numbers. Lab values are sparse
+    (a clozapine level every few weeks), so this never assumes a daily cadence."""
+    stats: dict = {}
+    for log in logs:
+        for name, r in custom_vital_readings(log).items():
+            stat = stats.setdefault(name, {"readings": []})
+            stat["readings"].append({"date": log.date.isoformat(), "value": r["value"], "unit": r["unit"]})
+    for stat in stats.values():
+        readings = sorted(stat["readings"], key=lambda r: r["date"])
+        stat["readings"] = readings
+        stat["count"] = len(readings)
+        stat["latest"] = readings[-1]
+        nums = [n for n in (_numeric(r["value"]) for r in readings) if n is not None]
+        stat["numeric_count"] = len(nums)
+        stat["min"] = min(nums) if nums else None
+        stat["max"] = max(nums) if nums else None
+        stat["avg"] = round(sum(nums) / len(nums), 2) if nums else None
+    return stats
+
+
+def _log_vitals_for_prompt(log) -> Optional[dict]:
+    v = log.vitals or {}
+    out = {k: v.get(k) for k in ("heart_rate", "blood_pressure") if v.get(k)}
+    custom = custom_vital_readings(log)
+    if custom:
+        out["custom"] = custom
+    return out or None
 
 
 def build_patient_aggregate(
@@ -322,7 +382,8 @@ def build_patient_aggregate(
             "symptoms": log.symptoms,
             "activities": log.activities,
             "lifestyle": log.lifestyle,
-            "medications_taken": log.medications_taken,
+            "vitals": _log_vitals_for_prompt(log),
+            "medications_taken": log_doses(log),
             "medication_side_effects": log.medication_side_effects,
             "notes": log.notes,
         })
@@ -364,6 +425,8 @@ def build_patient_aggregate(
         "lifestyle_totals": dict(lifestyle_totals),
         "log_entries": log_entries,
         "observation_periods": group_observation_periods(logs),
+        "as_needed_usage": as_needed_usage(logs, medications),
+        "custom_vital_stats": build_custom_vital_stats(logs),
     }
 
 
@@ -746,7 +809,7 @@ def build_adherence_series(logs, start_date: date_type, end_date: date_type) -> 
 
     by_date = {}
     for log in logs:
-        entries = log.medications_taken or []
+        entries = log_adherence_doses(log)
         if not entries:
             continue
         taken = sum(1 for e in entries if e.get("taken"))
@@ -1418,9 +1481,9 @@ def _medication_adherence_series(logs_by_date: dict, dates: list) -> dict:
         total = 0
         for wd in window_dates:
             log = logs_by_date.get(wd)
-            if not log or not log.medications_taken:
+            if not log:
                 continue
-            for m in log.medications_taken:
+            for m in log_adherence_doses(log):
                 total += 1
                 if m.get("taken"):
                     taken += 1

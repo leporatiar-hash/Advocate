@@ -60,6 +60,14 @@ class Medication(Base):
     time_of_day = Column(String)
     active = Column(Boolean, default=True)
 
+    # Dosing schedule — see services/med_schedule.py. All nullable: a med
+    # without a schedule_type is inferred from `frequency` (PRN text -> as
+    # needed, anything else -> daily).
+    schedule_type = Column(String, nullable=True)  # daily | every_n_days | weekdays | as_needed
+    schedule_interval_days = Column(Integer, nullable=True)
+    schedule_start_date = Column(Date, nullable=True)  # any day a dose was due; every_n_days anchor
+    schedule_weekdays = Column(JSON, nullable=True)  # [0-6], Monday = 0
+
     patient = relationship("Patient", back_populates="medications")
 
 

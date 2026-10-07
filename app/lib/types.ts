@@ -21,6 +21,29 @@ export interface Medication {
   frequency: string;
   time_of_day: string;
   active: boolean;
+  // Dosing schedule — see app/lib/medSchedule.ts. Null on meds created before
+  // schedules existed; those are inferred from `frequency`.
+  schedule_type?: MedScheduleType | null;
+  schedule_interval_days?: number | null;
+  schedule_start_date?: string | null; // YYYY-MM-DD, any day a dose was due
+  schedule_weekdays?: number[] | null;  // Monday = 0 … Sunday = 6
+}
+
+export type MedScheduleType = "daily" | "every_n_days" | "weekdays" | "as_needed";
+
+// A caregiver-defined vital or lab value. Older configs stored bare names;
+// normalize with normalizeCustomVitals (app/lib/customVitals.ts).
+export interface CustomVital {
+  name: string;
+  type: "number" | "text";
+  unit?: string;
+}
+
+// One reading, stored in DailyLog.vitals.custom keyed by vital name. The unit
+// is saved with the reading so a later unit change doesn't relabel old data.
+export interface CustomVitalReading {
+  value: string;
+  unit?: string | null;
 }
 
 export interface DashboardConfig {
@@ -36,7 +59,7 @@ export interface DashboardConfig {
   summary_style?: "compassionate" | "clinical" | "adaptive";
   dose_timing_mode?: "quick" | "simple" | "exact";
   tracking_modules?: string[]; // "sleep" | "hydration" | "vitals" | custom names
-  custom_vitals?: string[];    // e.g. ["Weight", "Blood Sugar"]
+  custom_vitals?: Array<CustomVital | string>; // legacy entries are bare names
   show_socialization?: boolean;
   // Display only — the underlying value logged is still 0-10 either way (no
   // schema change, same DailyLog.symptoms shape). "words" shows a four-tile
@@ -121,6 +144,7 @@ export interface Vitals {
   alcohol: boolean;
   alcohol_drinks: string;
   custom_substances?: Record<string, boolean>;
+  custom?: Record<string, CustomVitalReading>;
 }
 
 export interface SideEffect {
@@ -226,6 +250,26 @@ export interface SummaryResponse {
   adherence_data?: Record<string, { name: string; percentage: number; days_taken: number; days_logged: number }>;
   assessment_data?: Record<string, AssessmentDataEntry>;
   reviewable_facts?: ReviewableFact[];
+  // Server-computed, never AI-generated.
+  as_needed_usage?: Record<string, AsNeededUsage>;
+  custom_vital_stats?: Record<string, CustomVitalStat>;
+}
+
+export interface AsNeededUsage {
+  name: string;
+  times_given: number;
+  days_given: number;
+  dates: string[];
+}
+
+export interface CustomVitalStat {
+  readings: { date: string; value: string | number; unit: string | null }[];
+  count: number;
+  latest: { date: string; value: string | number; unit: string | null };
+  numeric_count: number;
+  min: number | null;
+  max: number | null;
+  avg: number | null;
 }
 
 export type InstrumentKey = "lawton_iadl" | "phq9" | "csi";

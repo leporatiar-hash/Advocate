@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Any, Dict
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Optional, List, Any, Dict, Literal
 from datetime import date, datetime
 from enum import Enum
 
@@ -62,14 +62,32 @@ class ResetPasswordRequest(BaseModel):
 
 # ── Medications ───────────────────────────────────────────────────────────────
 
-class MedicationCreate(BaseModel):
+# See services/med_schedule.py for how these are interpreted.
+ScheduleType = Literal["daily", "every_n_days", "weekdays", "as_needed"]
+
+
+class MedicationSchedule(BaseModel):
+    schedule_type: Optional[ScheduleType] = None
+    schedule_interval_days: Optional[int] = Field(default=None, ge=1, le=365)
+    schedule_start_date: Optional[date] = None
+    schedule_weekdays: Optional[List[int]] = None
+
+    @field_validator("schedule_weekdays")
+    @classmethod
+    def _weekdays_in_range(cls, v):
+        if v is not None and any(d < 0 or d > 6 for d in v):
+            raise ValueError("weekdays must be between 0 (Monday) and 6 (Sunday)")
+        return sorted(set(v)) if v is not None else v
+
+
+class MedicationCreate(MedicationSchedule):
     name: str
     dose: str
     frequency: str
     time_of_day: str
 
 
-class MedicationUpdate(BaseModel):
+class MedicationUpdate(MedicationSchedule):
     name: Optional[str] = None
     dose: Optional[str] = None
     frequency: Optional[str] = None
@@ -85,6 +103,10 @@ class MedicationResponse(BaseModel):
     frequency: str
     time_of_day: str
     active: bool
+    schedule_type: Optional[str] = None
+    schedule_interval_days: Optional[int] = None
+    schedule_start_date: Optional[date] = None
+    schedule_weekdays: Optional[List[int]] = None
 
     model_config = {"from_attributes": True}
 

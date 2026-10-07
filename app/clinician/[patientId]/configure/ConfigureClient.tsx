@@ -12,7 +12,8 @@ import {
   PRESET_TRACKING,
   DEFAULT_TRACKING,
 } from "../../../lib/constants";
-import type { DashboardConfig, Medication, SocialContact } from "../../../lib/types";
+import { normalizeCustomVitals, vitalLabel } from "../../../lib/customVitals";
+import type { CustomVital, DashboardConfig, Medication, SocialContact } from "../../../lib/types";
 
 type DemoConfig = {
   patient_id: number;
@@ -203,7 +204,7 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [activities, setActivities] = useState<string[]>([]);
   const [trackingModules, setTrackingModules] = useState<Set<string>>(new Set(DEFAULT_TRACKING));
-  const [customVitals, setCustomVitals] = useState<string[]>([]);
+  const [customVitals, setCustomVitals] = useState<CustomVital[]>([]);
   const [showCigarettes, setShowCigarettes] = useState(true);
   const [showAlcohol, setShowAlcohol] = useState(true);
   const [customSubstances, setCustomSubstances] = useState<string[]>([]);
@@ -228,7 +229,7 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
         setSymptoms(cfg.symptoms?.length ? cfg.symptoms : [...DEFAULT_SYMPTOM_NAMES]);
         setActivities(cfg.activities?.length ? cfg.activities : DEFAULT_ACTIVITY_OPTIONS.map((a) => a.type));
         setTrackingModules(new Set(cfg.tracking_modules?.length ? cfg.tracking_modules : DEFAULT_TRACKING));
-        setCustomVitals(cfg.custom_vitals ?? []);
+        setCustomVitals(normalizeCustomVitals(cfg.custom_vitals));
         const sf = cfg.substance_fields ?? ["cigarettes", "alcohol"];
         setShowCigarettes(sf.includes("cigarettes"));
         setShowAlcohol(sf.includes("alcohol"));
@@ -463,8 +464,16 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
             />
           ))}
           <p className="text-xs font-semibold uppercase tracking-wide pt-1" style={{ color: "var(--cp-text-muted)" }}>Custom vitals</p>
-          <Chips items={customVitals} onRemove={(v) => removeFrom(customVitals, setCustomVitals, v)} />
-          <AddInput placeholder="e.g. Weight, Blood sugar…" onAdd={(v) => addUnique(customVitals, setCustomVitals, capitalize(v))} />
+          <Chips
+            items={customVitals.map(v => v.name)}
+            labelFor={(name) => { const v = customVitals.find(c => c.name === name); return vitalLabel(name, v?.unit); }}
+            onRemove={(name) => { setCustomVitals(customVitals.filter(v => v.name !== name)); setDirty(true); }}
+          />
+          <AddInput placeholder="e.g. Weight, Blood sugar…" onAdd={(v) => {
+            // Name-only here; type and unit are set from the caregiver's Customize page.
+            setCustomVitals(normalizeCustomVitals([...customVitals, { name: capitalize(v), type: "number" }]));
+            setDirty(true);
+          }} />
         </Section>
 
         <Section title="Activities" subtitle="Activity options in the daily log">

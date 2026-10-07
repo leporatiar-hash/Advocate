@@ -76,6 +76,10 @@ def _build_assessment_data(patient_id: int, start_date, end_date, db: Session) -
     return assessment_data
 
 
+def _fmt_num(v) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) else str(v)
+
+
 def _build_reviewable_facts(patient_name: str, adherence: dict) -> list:
     """Correctable facts for the "Something look wrong?" review list. v1 only
     covers medication adherence misses, derived from the same adherence
@@ -129,6 +133,8 @@ def generate_summary(
             "discussion_items": [],
             "adherence_data": {},
             "reviewable_facts": [],
+            "as_needed_usage": {},
+            "custom_vital_stats": {},
         }
         assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
         if assessment_data:
@@ -175,7 +181,31 @@ def generate_summary(
     med_list_text = "\n".join(
         f"  - {d['name']}: {d['percentage']}% adherence ({d['days_taken']}/{d['days_logged']} days)"
         for d in adherence.values()
-    ) or "  No medications tracked."
+    ) or "  No scheduled medications tracked."
+
+    # As-needed (PRN) meds are never "missed" — report how often they were
+    # given instead. Text is built here so the model only restates numbers.
+    as_needed_lines = []
+    for d in agg["as_needed_usage"].values():
+        if d["days_given"]:
+            as_needed_lines.append(
+                f"  - {d['name']}: given {d['times_given']} time(s) on {d['days_given']} of {date_range_days} days "
+                f"(dates: {', '.join(d['dates'])})"
+            )
+        else:
+            as_needed_lines.append(f"  - {d['name']}: not given in this period")
+    as_needed_text = "\n".join(as_needed_lines) or "  No as-needed medications."
+
+    vital_lines = []
+    for name, st in agg["custom_vital_stats"].items():
+        unit = st["latest"]["unit"]
+        u = f" {unit}" if unit else ""
+        readings = ", ".join(f"{r['date']}: {r['value']}{(' ' + r['unit']) if r['unit'] else ''}" for r in st["readings"])
+        line = f"  - {name}: {st['count']} reading(s); latest {st['latest']['value']}{u} on {st['latest']['date']}"
+        if st["numeric_count"] >= 2:
+            line += f"; range {_fmt_num(st['min'])}–{_fmt_num(st['max'])}{u}, average {_fmt_num(st['avg'])}{u}"
+        vital_lines.append(f"{line}. Readings: {readings}")
+    custom_vitals_text = "\n".join(vital_lines) or "  No custom vitals or lab values recorded."
 
     # Only state a statistic that actually has a value. A metric with no logged
     # data must be omitted, never rendered as "None" — handing the model a
@@ -277,8 +307,14 @@ TREATMENT PLAN (what was planned — compare against what actually happened in t
 MEDICATIONS AND KNOWN SIDE EFFECTS (Known = documented for this drug; Observed = what caregiver logged; [known side effect] = aligns with drug profile; [unexpected] = not in drug profile):
 {known_se_context}
 
-MEDICATION ADHERENCE:
+MEDICATION ADHERENCE (scheduled doses only — days a medication was not scheduled are excluded, never counted as missed):
 {med_list_text}
+
+AS-NEEDED MEDICATION USE (taken only when needed — these are NEVER missed doses; describe frequency of use, not adherence):
+{as_needed_text}
+
+CUSTOM VITALS / LAB VALUES (entered by the caregiver when measured — sparse readings are expected and are not gaps in care):
+{custom_vitals_text}
 
 AGGREGATED STATISTICS:
 {aggregated_stats_text}
@@ -301,6 +337,8 @@ KEY PATTERNS TO ANALYZE:
 - Note activity types that appear to correlate with fewer Severe symptom days
 - Flag any persistent or severe medication side effects
 - Note missed-dose patterns
+- Note how often as-needed medications were used and whether use clusters around symptom changes
+- Note trends in custom vitals / lab values over time, using only the readings listed above
 - Highlight week-over-week changes if visible in the raw data
 
 RAW LOG DATA (chronological):
@@ -389,6 +427,8 @@ Please generate a summary as JSON with exactly these fields:
         str(mid): d for mid, d in adherence.items()
     }
     summary_data["reviewable_facts"] = _build_reviewable_facts(patient.name, adherence)
+    summary_data["as_needed_usage"] = {str(mid): d for mid, d in agg["as_needed_usage"].items()}
+    summary_data["custom_vital_stats"] = agg["custom_vital_stats"]
 
     assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
     if assessment_data:

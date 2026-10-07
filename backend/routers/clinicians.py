@@ -38,6 +38,7 @@ from services.aggregation import (
     TIMELINE_DOMAIN_DEFS,
 )
 from services.changes import build_changes, resolve_spans
+from services.med_schedule import filter_false_misses, log_adherence_doses, log_doses
 from services.ticker_headline import fallback_headline, generate_headline, rank_symptoms
 
 logger = logging.getLogger(__name__)
@@ -436,7 +437,7 @@ def get_symptom_ticker(
         for log in logs
         if log.date.isoformat() >= window_start_iso
         for badges in [note_badges({
-            "episode": log.episode, "symptoms": log.symptoms, "medications_taken": log.medications_taken,
+            "episode": log.episode, "symptoms": log.symptoms, "medications_taken": log_doses(log),
         })]
         if badges
     ]
@@ -448,7 +449,7 @@ def get_symptom_ticker(
             "date": log.date,
             "text": log.notes,
             "badges": note_badges({
-                "episode": log.episode, "symptoms": log.symptoms, "medications_taken": log.medications_taken,
+                "episode": log.episode, "symptoms": log.symptoms, "medications_taken": log_doses(log),
             }),
             "reaffirmed_dates": [],
         }
@@ -575,11 +576,12 @@ def get_quick_tiles(
     labels = {d["key"]: d["label"] for d in TIMELINE_DOMAIN_DEFS}
 
     # The medication series is a rolling 7-day percentage, so the tile's
-    # "missed doses" caption needs its own exact count from the raw entries.
+    # "missed doses" caption needs its own exact count from the raw entries —
+    # scheduled doses only (see services/med_schedule.py).
     doses_expected = 0
     doses_missed = 0
     for log in logs:
-        for m in log.medications_taken or []:
+        for m in log_adherence_doses(log):
             doses_expected += 1
             if not m.get("taken"):
                 doses_missed += 1
@@ -691,13 +693,14 @@ def get_clinician_log(
     # Resolve medication names inline so the read-only drill-down doesn't need a
     # second request — includes inactive/deleted meds since a historical log may
     # reference one no longer on the active list.
-    med_names = {
-        m.id: m.name
+    meds_by_id = {
+        m.id: m
         for m in db.query(models.Medication).filter(models.Medication.patient_id == patient_id).all()
     }
     medications_taken = [
-        {**entry, "medication_name": med_names.get(entry.get("medication_id"), "Medication")}
-        for entry in (log.medications_taken or [])
+        {**entry, "medication_name": meds_by_id[entry["medication_id"]].name
+         if entry.get("medication_id") in meds_by_id else "Medication"}
+        for entry in filter_false_misses(log.medications_taken, meds_by_id, log.date)
     ]
 
     data = {f: getattr(log, f) for f in schemas.DailyLogResponse.model_fields}
