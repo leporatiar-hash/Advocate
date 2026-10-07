@@ -26,7 +26,7 @@ interface TileView {
 }
 
 const TILE_VIEW: Record<TileKey, TileView> = {
-  sleep: { spec: { min: 0, max: 12, concern: { from: 0, to: 5 }, fmt: (v) => `${v}h` }, top: "Long", bottom: "Short", smooth: true },
+  sleep: { spec: { min: 0, max: 16, concern: { from: 0, to: 5 }, fmt: (v) => `${v}h` }, top: "Long", bottom: "Short", smooth: true },
   anxiety: { spec: { min: 0, max: 10, concern: { from: 7, to: 10 }, fmt: (v) => `${v}` }, top: "High", bottom: "Low", smooth: true },
   // Already a rolling 7-day percentage server-side — no further smoothing.
   medication: { spec: { min: 0, max: 100, concern: { from: 0, to: 50 }, fmt: (v) => `${v}%` }, top: "All taken", bottom: "None", smooth: false },

@@ -1848,8 +1848,8 @@ function LogPageInner() {
           isOpen={openSection === "sleep"} onToggle={() => toggle("sleep")}>
 
           <LabeledSlider label="Hours of sleep last night" value={draft.sleepHours}
-            min={0} max={12} step={0.5} onChange={v => update({ sleepHours: v })}
-            leftLabel="0 hrs" rightLabel="12 hrs" unit=" hrs" />
+            min={0} max={16} step={0.5} onChange={v => update({ sleepHours: v })}
+            leftLabel="0 hrs" rightLabel="16 hrs" unit=" hrs" />
         </AccordionSection>
 
         {/* ── Hydration ── */}
