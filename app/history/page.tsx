@@ -61,7 +61,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
     ...Object.entries(customReadings(v)).map(([name, r]) => `${name} ${formatReading(r)}`),
   ].filter(Boolean) as string[];
   return (
-    <div className="mt-3 space-y-3 text-sm border-t border-slate-100 pt-3">
+    <div className="mt-3 space-y-3 text-sm border-t border-[#e3ebe5] pt-3">
 
       {/* Vitals row */}
       {(log.mood_score !== null || log.sleep_hours !== null || log.water_intake_oz !== null) && (
@@ -93,7 +93,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
 
       {vitalParts.length > 0 && (
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Vitals</p>
+          <p className="text-sm font-semibold warm-soft mb-1.5">Vitals</p>
           <p className="text-sm text-slate-700">{vitalParts.join(" · ")}</p>
         </div>
       )}
@@ -101,7 +101,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
       {/* Medications */}
       {doses.length > 0 && (
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Medications</p>
+          <p className="text-sm font-semibold warm-soft mb-1.5">Medications</p>
           <div className="space-y-1">
             {doses.map((m, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -127,7 +127,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
       {/* Symptoms */}
       {(log.symptoms ?? []).length > 0 && (
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Symptoms</p>
+          <p className="text-sm font-semibold warm-soft mb-1.5">Symptoms</p>
           <div className="flex flex-wrap gap-1.5">
             {(log.symptoms ?? []).map((s, i) => {
               const sv = s.severity ?? 0;
@@ -158,7 +158,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
       {/* Activities */}
       {(log.activities ?? []).length > 0 && (
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Activities</p>
+          <p className="text-sm font-semibold warm-soft mb-1.5">Activities</p>
           <div className="flex flex-wrap gap-1.5">
             {(log.activities ?? []).map((a, i) => (
               <span key={i} className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
@@ -173,7 +173,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
       {/* Lifestyle */}
       {log.lifestyle && Object.values(log.lifestyle).some(Boolean) && (
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Lifestyle</p>
+          <p className="text-sm font-semibold warm-soft mb-1.5">Lifestyle</p>
           <div className="flex flex-wrap gap-1.5">
             {log.lifestyle.smoked && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-700">Smoked</span>}
             {log.lifestyle.alcohol && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-700">Alcohol</span>}
@@ -186,7 +186,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
       {/* Notes */}
       {log.notes?.trim() && (
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Notes</p>
+          <p className="text-sm font-semibold warm-soft mb-1">Notes</p>
           <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{log.notes}</p>
         </div>
       )}
@@ -209,8 +209,7 @@ function DayRow({ log, medications }: { log: DailyLog; medications: Medication[]
 
   return (
     <div
-      className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden"
-      style={{ borderColor: hasEpisode ? "#d4e0d7" : undefined }}
+      className="warm-card overflow-hidden"
     >
       <button
         type="button"
@@ -219,8 +218,7 @@ function DayRow({ log, medications }: { log: DailyLog; medications: Medication[]
       >
         {/* Date */}
         <div className="flex-shrink-0 w-14 text-center">
-          <p className={`text-sm font-bold ${isToday ? "text-teal" : "text-navy"}`}>{dateLabel}</p>
-          {isToday && <p className="text-xs text-teal">Today</p>}
+          <p className="text-sm font-semibold" style={{ color: isToday ? "#4a7c59" : "#1a2420" }}>{dateLabel}</p>
         </div>
 
         {/* Summary pills */}
@@ -231,7 +229,7 @@ function DayRow({ log, medications }: { log: DailyLog; medications: Medication[]
             </span>
           )}
           {log.sleep_hours !== null && (
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f4efe6", color: "#2d4f38" }}>
               Sleep {log.sleep_hours}h
             </span>
           )}
@@ -338,9 +336,9 @@ export default function HistoryPage() {
 
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-navy">History</h1>
+          <h1 className="warm-h1 text-3xl">History</h1>
           {patient && (
-            <p className="text-base text-slate-500 mt-1">{patient.name} · {logs.length} day{logs.length !== 1 ? "s" : ""} logged</p>
+            <p className="text-base warm-soft mt-1">{patient.name} · {logs.length} day{logs.length !== 1 ? "s" : ""} logged</p>
           )}
         </div>
 
@@ -355,27 +353,25 @@ export default function HistoryPage() {
               placeholder="Search by date, symptom, or note…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 rounded-2xl bg-white border border-slate-200 text-base text-navy placeholder:text-slate-400 focus:outline-none focus:border-teal-500"
+              className="w-full pl-10 pr-4 py-3 rounded-2xl bg-white border border-[#e3ebe5] text-base text-navy placeholder:text-slate-400 focus:outline-none focus:border-[#4a7c59]"
             />
           </div>
         )}
 
         {/* Empty state */}
         {logs.length === 0 && (
-          <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 flex flex-col items-center gap-3 text-center">
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: "#e8f0eb" }}>
-              <svg className="w-7 h-7" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <p className="text-lg font-bold text-navy">No logs yet</p>
-            <p className="text-base text-slate-500">Start logging daily observations and they&apos;ll appear here.</p>
+          <div className="warm-card p-8 flex flex-col items-center gap-3 text-center">
+            <svg className="w-8 h-8" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <p className="warm-h2 text-lg">No logs yet</p>
+            <p className="text-base warm-soft">Start logging daily observations and they&apos;ll appear here.</p>
           </div>
         )}
 
         {/* No search results */}
         {logs.length > 0 && filtered.length === 0 && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center">
+          <div className="warm-card p-6 text-center">
             <p className="text-base text-slate-400">No logs matching &ldquo;{search}&rdquo;</p>
           </div>
         )}
@@ -383,7 +379,7 @@ export default function HistoryPage() {
         {/* Timeline grouped by month */}
         {groups.map(group => (
           <div key={group.month} className="space-y-2">
-            <p className="text-xs font-bold uppercase tracking-widest text-slate-400 px-1">{group.month}</p>
+            <h2 className="warm-h2 text-base px-1">{group.month}</h2>
             {group.logs.map(log => (
               <DayRow key={log.id} log={log} medications={patient?.medications ?? []} />
             ))}

@@ -133,17 +133,19 @@ function AdherenceBar({ item }: { item: AdherenceItem }) {
 
 // ── Insight card ──────────────────────────────────────────────────────────────
 
+// White card with a serif title in the section's color. bgColor/borderColor
+// are still accepted from call sites but no longer tint the card.
 function InsightCard({
-  title, accentColor, bgColor, borderColor, children,
+  title, accentColor, children,
 }: {
   title: string; accentColor: string; bgColor: string; borderColor: string; children: React.ReactNode;
 }) {
   return (
-    <div className="insight-card rounded-2xl overflow-hidden shadow-sm border" style={{ borderColor }}>
-      <div className="insight-card-header px-5 py-3 border-b" style={{ background: accentColor, borderColor }}>
-        <h2 className="text-base font-bold text-white">{title}</h2>
+    <div className="insight-card warm-card overflow-hidden">
+      <div className="insight-card-header px-5 pt-4 pb-1 bg-white">
+        <h2 className="warm-h2 text-lg" style={{ color: accentColor }}>{title}</h2>
       </div>
-      <div className="insight-card-body px-5 py-4 space-y-3" style={{ background: bgColor }}>
+      <div className="insight-card-body px-5 pt-2 pb-4 space-y-3">
         {children}
       </div>
     </div>
@@ -223,7 +225,7 @@ function MedSafetyCard({ data }: { data: Record<string, MedicationSideEffectSumm
 
               {info.known.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: "#7C3AED" }}>Known side effects</p>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "#7C3AED" }}>Known side effects</p>
                   <div className="flex flex-wrap gap-1.5">
                     {info.known.map((k, i) => (
                       <span key={i} className="text-xs px-2 py-0.5 rounded-full font-medium"
@@ -236,7 +238,7 @@ function MedSafetyCard({ data }: { data: Record<string, MedicationSideEffectSumm
               )}
 
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: hasObserved ? "#DC2626" : "#4a7c59" }}>
+                <p className="text-sm font-semibold mb-1" style={{ color: hasObserved ? "#DC2626" : "#4a7c59" }}>
                   Observed
                 </p>
                 {hasObserved ? (
@@ -557,9 +559,9 @@ export default function SummaryPage() {
 
         {/* Header — screen only */}
         <div className="no-print">
-          <h1 className="text-3xl font-bold text-navy">Summary</h1>
+          <h1 className="warm-h1 text-3xl">Summary</h1>
           {patient && (
-            <p className="text-base text-slate-500 mt-1">{patient.name} · {patient.diagnosis}</p>
+            <p className="text-base warm-soft mt-1">A write-up of how {patient.name} has been, ready for the care team</p>
           )}
 
         </div>
@@ -581,32 +583,27 @@ export default function SummaryPage() {
 
         {/* Generate prompt */}
         {!summary && !generating && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-5">
-            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center" style={{ background: "#e8f0eb" }}>
-              <svg className="w-7 h-7" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-bold text-navy">Ready to generate insights</p>
-              <p className="text-base text-slate-500 mt-1">
-                Analyzes the last 30 days of logs and produces a doctor-ready summary.
+          <div className="warm-card p-5 space-y-5">
+            <div>
+              <p className="warm-h2 text-xl">Write a summary</p>
+              <p className="text-base warm-soft mt-1">
+                Turns your logs into a clear summary you can bring to the next appointment. Pick the period to cover.
               </p>
             </div>
 
             {/* Date range toggle */}
-            <div className="flex rounded-xl border border-slate-200 overflow-hidden">
-              {(["7days", "30days", "custom"] as const).map((opt, i) => (
+            <div className="flex gap-1 rounded-2xl p-1" style={{ background: "#f4efe6", border: "1px solid #e9e0d0" }} role="group" aria-label="Period">
+              {(["7days", "30days", "custom"] as const).map((opt) => (
                 <button
                   key={opt}
                   onClick={() => setRangeType(opt)}
-                  className={`flex-1 py-2.5 text-sm font-semibold transition-colors${i < 2 ? " border-r border-slate-200" : ""}`}
-                  style={{
-                    background: rangeType === opt ? "#2d4f38" : "transparent",
-                    color: rangeType === opt ? "white" : "#94a3b8",
-                  }}
+                  aria-pressed={rangeType === opt}
+                  className="flex-1 py-2 rounded-xl text-sm font-semibold transition-all"
+                  style={rangeType === opt
+                    ? { background: "white", color: "#2d4f38", boxShadow: "0 1px 2px rgba(26,36,32,0.08)" }
+                    : { background: "transparent", color: "#6b7d74" }}
                 >
-                  {opt === "7days" ? "7 Days" : opt === "30days" ? "30 Days" : "Custom"}
+                  {opt === "7days" ? "Last 7 days" : opt === "30days" ? "Last 30 days" : "Pick dates"}
                 </button>
               ))}
             </div>
@@ -618,25 +615,23 @@ export default function SummaryPage() {
                   type="date"
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
-                  className="flex-1 border border-slate-200 rounded-xl px-3 py-3 text-base text-navy"
-                  style={{ background: "#f8fafc" }}
+                  className="flex-1 border border-[#e3ebe5] rounded-xl px-3 py-3 text-base text-navy bg-white"
                 />
                 <input
                   type="date"
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
-                  className="flex-1 border border-slate-200 rounded-xl px-3 py-3 text-base text-navy"
-                  style={{ background: "#f8fafc" }}
+                  className="flex-1 border border-[#e3ebe5] rounded-xl px-3 py-3 text-base text-navy bg-white"
                 />
               </div>
             )}
 
             <button
               onClick={handleGenerate}
-              className="w-full py-4 rounded-2xl font-bold text-white text-base"
-              style={{ background: "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+              className="w-full py-3.5 rounded-2xl font-semibold text-white text-base shadow-sm"
+              style={{ background: "#4a7c59" }}
             >
-              Generate Insights
+              Write the summary
             </button>
           </div>
         )}
@@ -759,7 +754,7 @@ export default function SummaryPage() {
             </div>
 
             {/* Something look wrong? review */}
-            <div className="no-print bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
+            <div className="no-print warm-card p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-base font-semibold text-navy">Something look wrong?</p>
                 <button
@@ -771,7 +766,7 @@ export default function SummaryPage() {
                 </button>
               </div>
               {reviewOpen && (
-                <div className="pt-1 border-t border-slate-100">
+                <div className="pt-1 border-t border-[#e3ebe5]">
                   <ReviewFacts
                     facts={summary.reviewable_facts ?? []}
                     confirmKey={confirmFactKey}
@@ -822,14 +817,14 @@ export default function SummaryPage() {
 
         {/* Saved Summaries */}
         <div className="no-print space-y-3 pb-4">
-          <h2 className="text-xl font-bold text-navy">Saved Summaries</h2>
+          <h2 className="warm-h2 text-xl">Saved summaries</h2>
           {savedSummaries.length === 0 ? (
             <p className="text-sm text-slate-400">No saved summaries yet. Generate a summary above and save it.</p>
           ) : (
             savedSummaries.map((saved) => {
               const parsed: SummaryResponse | null = (() => { try { return JSON.parse(saved.content); } catch { return null; } })();
               return (
-                <div key={saved.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                <div key={saved.id} className="warm-card overflow-hidden">
                   <div className="px-4 py-3 flex items-center gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-base font-semibold text-navy truncate">{parseSummaryTitle(saved.title)}</p>
@@ -856,7 +851,7 @@ export default function SummaryPage() {
                   </div>
 
                   {deleteConfirmId === saved.id && (
-                    <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3" style={{ background: "#fef2f2" }}>
+                    <div className="px-4 py-3 border-t border-[#e3ebe5] flex items-center justify-between gap-3" style={{ background: "#fef2f2" }}>
                       <p className="text-sm text-slate-600">Delete this saved summary?</p>
                       <div className="flex gap-2">
                         <button
@@ -878,7 +873,7 @@ export default function SummaryPage() {
                   )}
 
                   {expandedId === saved.id && parsed && (
-                    <div className="px-4 pb-4 pt-2 space-y-3 border-t border-slate-100">
+                    <div className="px-4 pb-4 pt-2 space-y-3 border-t border-[#e3ebe5]">
                       <InsightCard title="Executive Summary" accentColor="#1a2420" bgColor="white" borderColor="#d4e0d7">
                         <p className="text-base leading-relaxed text-slate-700">{parsed.executive_summary}</p>
                       </InsightCard>

@@ -87,7 +87,7 @@ function QuickPhotoCard({
   const hasPhoto = !!(todayLog?.photo);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+    <div className="warm-card overflow-hidden">
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
       <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
 
@@ -178,7 +178,7 @@ function TodayRow({
     <Link
       href={href}
       className="flex items-center gap-4 px-5 py-4 transition-colors active:bg-slate-50"
-      style={{ borderBottom: "1px solid #F1F5F9" }}
+      style={{ borderBottom: "1px solid #e3ebe5" }}
     >
       {/* Status icon */}
       <div
@@ -370,10 +370,10 @@ export default function DashboardPage() {
 
         {/* Greeting */}
         <div>
-          <h1 className="text-3xl font-bold text-navy">
+          <h1 className="warm-h1 text-3xl">
             Good {getTimeOfDay()}, {user?.name?.split(" ")[0]}.
           </h1>
-          <p className="text-base text-slate-500 mt-1">
+          <p className="text-base warm-soft mt-1">
             {patient ? `Here's how ${patient.name} is doing.` : "Welcome back."}
           </p>
           {user?.user_config?.greeting && (
@@ -386,30 +386,31 @@ export default function DashboardPage() {
         {patient ? (
           <>
             {/* Patient card — compact */}
-            <div className="rounded-2xl px-5 py-4 flex items-center justify-between text-white" style={{ background: "#1a2420" }}>
-              <div>
-                <p className="text-slate-400 text-sm font-medium">{patient.diagnosis}</p>
-                <p className="text-xl font-bold mt-0.5">{patient.name}</p>
+            <div className="warm-panel px-5 py-4 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm warm-soft">You&apos;re caring for</p>
+                <p className="warm-h2 text-2xl truncate">{patient.name}</p>
+                <p className="text-sm warm-soft truncate">{patient.diagnosis}</p>
               </div>
-              <div className="text-right">
-                <p className="text-slate-400 text-sm">Streak</p>
-                <p className="text-3xl font-bold" style={{ color: "#4a7c59" }}>{calcStreak}<span className="text-base font-normal text-slate-400 ml-1">{calcStreak === 1 ? "day" : "days"}</span></p>
+              <div className="text-right flex-shrink-0">
+                <p className="text-sm warm-soft">Logged</p>
+                <p className="warm-h2 text-3xl">{calcStreak}<span className="text-base warm-soft ml-1" style={{ fontFamily: "inherit" }}>{calcStreak === 1 ? "day" : "days"} in a row</span></p>
               </div>
             </div>
 
             {/* Streak = 0 nudge */}
             {calcStreak === 0 && (
-              <div className="rounded-2xl px-5 py-4 border" style={{ background: "#FFF8EC", borderColor: "#d4e0d7" }}>
-                <p className="text-base font-medium" style={{ color: "#92400E" }}>
+              <div className="warm-card px-5 py-4">
+                <p className="text-base" style={{ color: "#2d4f38" }}>
                   Start logging today. Every entry helps {patient.name}&apos;s doctor understand them better.
                 </p>
               </div>
             )}
 
             {/* Today checklist card */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="warm-card overflow-hidden">
               <div className="px-5 pt-4 pb-3 flex items-center justify-between">
-                <h2 className="text-lg font-bold text-navy">Today</h2>
+                <h2 className="warm-h2 text-lg">Today</h2>
                 <span className="text-sm font-semibold" style={{ color: completedCount === totalRequired ? "#4a7c59" : "#94A3B8" }}>
                   {completedCount}/{totalRequired} done
                 </span>
@@ -439,29 +440,29 @@ export default function DashboardPage() {
             {/* Primary CTA */}
             <Link
               href={ctaHref}
-              className="block w-full py-5 rounded-3xl text-center text-white font-bold text-xl shadow-lg transition-transform active:scale-[0.98]"
-              style={{ background: allDone ? "#2d4f38" : "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+              className="block w-full py-4 rounded-2xl text-center text-white font-semibold text-lg shadow-sm transition-transform active:scale-[0.98]"
+              style={{ background: allDone ? "#2d4f38" : "#4a7c59" }}
             >
               {ctaLabel}
             </Link>
 
             {/* Stats row */}
             <div className="flex gap-3">
-              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex-1 text-center">
-                <p className="text-3xl font-bold text-navy">{monthAdherence !== null ? `${monthAdherence}%` : "—"}</p>
-                <p className="text-sm text-slate-500 mt-1">Adherence this month</p>
+              <div className="warm-card p-4 flex-1 text-center">
+                <p className="warm-h2 text-3xl">{monthAdherence !== null ? `${monthAdherence}%` : "—"}</p>
+                <p className="text-sm warm-soft mt-1">Meds taken this month</p>
               </div>
-              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex-1 text-center">
-                <p className="text-3xl font-bold text-navy">{thisMonth.length}</p>
-                <p className="text-sm text-slate-500 mt-1">Days logged</p>
+              <div className="warm-card p-4 flex-1 text-center">
+                <p className="warm-h2 text-3xl">{thisMonth.length}</p>
+                <p className="text-sm warm-soft mt-1">Days logged this month</p>
               </div>
             </div>
 
             {vitalTrends.length > 0 && (
-              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-5">
+              <div className="warm-card p-4 space-y-5">
                 <div>
-                  <p className="text-base font-semibold text-navy">Vitals trends</p>
-                  <p className="text-sm text-slate-500">Last 90 days · tap a point for its value</p>
+                  <p className="warm-h2 text-lg">Vitals trends</p>
+                  <p className="text-sm warm-soft">Last 90 days · tap a point for its value</p>
                 </div>
                 {vitalTrends.map(t => (
                   <VitalTrendChart key={t.name} name={t.name} unit={t.unit} points={t.points}
@@ -470,46 +471,39 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Quick actions */}
-            <Link
-              href="/summary"
-              className="flex items-center justify-between bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 transition-colors active:bg-slate-50"
-            >
-              <div>
-                <p className="text-base font-semibold text-navy">AI Insights</p>
-                <p className="text-sm text-slate-500 mt-0.5">Generate a doctor-ready summary</p>
+            {/* For the care team */}
+            <section className="space-y-2">
+              <h2 className="warm-h2 text-base px-1">For the care team</h2>
+              <div className="warm-card overflow-hidden">
+                <Link href="/summary" className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-[#f7faf8] active:bg-[#eef4f0]" style={{ borderBottom: "1px solid #e3ebe5" }}>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-navy">Summary for the doctor</p>
+                    <p className="text-sm warm-soft mt-0.5">A clear write-up of the last few weeks</p>
+                  </div>
+                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#b8c7bd" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+                <Link href="/print" className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-[#f7faf8] active:bg-[#eef4f0]" style={{ borderBottom: "1px solid #e3ebe5" }}>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-navy">Printable report</p>
+                    <p className="text-sm warm-soft mt-0.5">The last 7 or 30 days, ready to hand over</p>
+                  </div>
+                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#b8c7bd" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+                <Link href="/photos" className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-[#f7faf8] active:bg-[#eef4f0]">
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-navy">Photo timeline</p>
+                    <p className="text-sm warm-soft mt-0.5">Scroll back through photos by date</p>
+                  </div>
+                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#b8c7bd" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
               </div>
-              <svg className="w-5 h-5" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </Link>
-
-            <Link
-              href="/print"
-              className="flex items-center justify-between bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 transition-colors active:bg-slate-50"
-            >
-              <div>
-                <p className="text-base font-semibold text-navy">Print Report</p>
-                <p className="text-sm text-slate-500 mt-0.5">Last 7 or 30 days, formatted for the doctor</p>
-              </div>
-              <svg className="w-5 h-5" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-              </svg>
-            </Link>
-
-            <Link
-              href="/photos"
-              className="flex items-center justify-between bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 transition-colors active:bg-slate-50"
-            >
-              <div>
-                <p className="text-base font-semibold text-navy">Photo Timeline</p>
-                <p className="text-sm text-slate-500 mt-0.5">Scroll through photos by date</p>
-              </div>
-              <svg className="w-5 h-5" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </Link>
+            </section>
           </>
         ) : (
           <div className="text-center py-16">

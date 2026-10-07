@@ -82,8 +82,10 @@ function OtherSideEffectInput({ onAdd }: { onAdd: (name: string) => void }) {
 
 // ── Accordion section ─────────────────────────────────────────────────────────
 
+// Every section shares the warm card look. The color props are still accepted
+// so call sites stay unchanged, but no longer change the rendering.
 function AccordionSection({
-  id, title, summaryLine, bgColor, borderColor, headingColor,
+  id, title, summaryLine,
   isOpen, onToggle, onSettings, children,
 }: {
   id: string; title: string; summaryLine: string;
@@ -91,23 +93,23 @@ function AccordionSection({
   isOpen: boolean; onToggle: () => void; onSettings?: () => void; children: React.ReactNode;
 }) {
   return (
-    <div id={id} className="rounded-2xl overflow-hidden shadow-sm border" style={{ borderColor }}>
-      <div className="flex items-stretch" style={{ background: bgColor }}>
+    <div id={id} className="warm-card overflow-hidden">
+      <div className="flex items-stretch bg-white">
         <button
           type="button"
           onClick={onToggle}
           className="flex-1 flex items-center justify-between px-5 py-4 text-left min-w-0"
         >
           <div className="flex-1 min-w-0 pr-3">
-            <p className="text-lg font-bold" style={{ color: headingColor }}>{title}</p>
+            <p className="warm-h2 text-lg">{title}</p>
             <p
-              className="text-sm mt-0.5 truncate transition-opacity duration-200"
-              style={{ color: headingColor + "99", opacity: isOpen ? 0 : 1 }}
+              className="text-sm mt-0.5 truncate transition-opacity duration-200 warm-soft"
+              style={{ opacity: isOpen ? 0 : 1 }}
             >{summaryLine}</p>
           </div>
           <svg
             className="w-5 h-5 flex-shrink-0 transition-transform duration-200"
-            style={{ color: headingColor, transform: isOpen ? "rotate(180deg)" : "none" }}
+            style={{ color: "#6b7d74", transform: isOpen ? "rotate(180deg)" : "none" }}
             fill="none" stroke="currentColor" viewBox="0 0 24 24"
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -118,7 +120,7 @@ function AccordionSection({
             type="button"
             onClick={onSettings}
             className="px-4 flex items-center border-l"
-            style={{ color: headingColor + "80", borderColor: headingColor + "20" }}
+            style={{ color: "#6b7d74", borderColor: "#e3ebe5" }}
             aria-label="Manage contacts"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -134,7 +136,7 @@ function AccordionSection({
           display: "grid",
           gridTemplateRows: isOpen ? "1fr" : "0fr",
           transition: "grid-template-rows 0.25s ease",
-          background: bgColor,
+          background: "white",
         }}
       >
         <div style={{ overflow: "hidden" }}>
@@ -989,10 +991,10 @@ function LogPageInner() {
         <NavBar />
         <div className="max-w-lg mx-auto px-4 pt-6 space-y-4">
           <div>
-            <h1 className="text-3xl font-bold text-navy">
+            <h1 className="warm-h1 text-3xl">
               {catchupDays.length} {catchupDays.length === 1 ? "day" : "days"} missed
             </h1>
-            <p className="text-base text-slate-500 mt-1">Log what you remember for each day</p>
+            <p className="text-base warm-soft mt-1">Log what you remember for each day</p>
           </div>
 
           <div className="space-y-3">
@@ -1257,17 +1259,17 @@ function LogPageInner() {
             >
               ← Back
             </button>
-            <h1 className="text-3xl font-bold text-navy">
+            <h1 className="warm-h1 text-3xl">
               {targetDateObj.toLocaleDateString("en-US", { weekday: "long" })}
             </h1>
-            <p className="text-base text-slate-500 mt-1">
+            <p className="text-base warm-soft mt-1">
               {targetDateObj.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
             </p>
           </div>
         ) : (
           <div>
-            <h1 className="text-3xl font-bold text-navy">Daily Log</h1>
-            <p className="text-base text-slate-500 mt-1">
+            <h1 className="warm-h1 text-3xl">Daily Log</h1>
+            <p className="text-base warm-soft mt-1">
               {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
             </p>
           </div>
@@ -1307,15 +1309,15 @@ function LogPageInner() {
         )}
 
         {loadedFromServer && (
-          <div className="flex items-center justify-between rounded-xl px-4 py-3 text-sm" style={{ background: "#EFF6FF", border: "1px solid #BFDBFE" }}>
-            <span style={{ color: "#1D4ED8" }}>Previous entry loaded. Want to start fresh?</span>
+          <div className="warm-panel flex items-center justify-between px-4 py-3 text-sm" style={{ borderRadius: "1rem" }}>
+            <span style={{ color: "#2d4f38" }}>You&apos;re editing the saved entry for this day.</span>
             <button
               type="button"
               onClick={startFresh}
               className="ml-3 font-semibold underline underline-offset-2 flex-shrink-0"
-              style={{ color: "#1D4ED8" }}
+              style={{ color: "#4a7c59" }}
             >
-              Clear form
+              Start over
             </button>
           </div>
         )}
@@ -1436,7 +1438,7 @@ function LogPageInner() {
 
             return (
               <div key={med.id} className="space-y-3" style={offDay && doses.length === 0 ? { opacity: 0.75 } : undefined}>
-                {idx > 0 && <div className="border-t border-amber-100" />}
+                {idx > 0 && <div className="border-t border-[#e3ebe5]" />}
 
                 {/* Med name + dose count */}
                 <div className="flex items-center justify-between gap-3">
@@ -1632,11 +1634,11 @@ function LogPageInner() {
           })}
 
           {/* ── Manage medications ── */}
-          <div className="pt-2 border-t border-amber-100">
+          <div className="pt-2 border-t border-[#e3ebe5]">
             <button
               type="button"
               onClick={() => setShowMedManage(v => !v)}
-              className="flex items-center gap-1.5 text-sm font-medium text-amber-700"
+              className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: "#4a7c59" }}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -2303,8 +2305,8 @@ function LogPageInner() {
               )}
               <button
                 onClick={handleSubmit}
-                className="w-full py-3 rounded-xl font-semibold text-white text-base shadow-md transition-all active:scale-[0.98]"
-                style={{ background: "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+                className="w-full py-3.5 rounded-2xl font-semibold text-white text-base shadow-md transition-all active:scale-[0.98]"
+                style={{ background: "#4a7c59" }}
               >
                 {isHistorical ? "Save Entry" : "Save Log"}
               </button>

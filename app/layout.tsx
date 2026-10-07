@@ -6,6 +6,7 @@ import { AuthProvider } from "./components/AuthProvider";
 import { Toaster } from "react-hot-toast";
 import TopProgressBar from "./components/TopProgressBar";
 import { Analytics } from "@vercel/analytics/next";
+import { lora } from "./lib/warmTheme";
 
 const geist = Geist({
   variable: "--font-geist-sans",
@@ -39,7 +40,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${geist.variable} antialiased`}>
+      <body className={`${geist.variable} ${lora.variable} antialiased`}>
         <Suspense fallback={null}>
           <TopProgressBar />
         </Suspense>
