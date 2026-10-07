@@ -85,7 +85,7 @@ from auth import get_password_hash  # noqa: E402
 # demo.internal placeholders: nobody needs to log in as them.
 DEMO_CAREGIVER_EMAIL = "demo.caregiver@advocate.health"
 DEMO_CLINICIAN_EMAIL = "demo.clinician@advocate.health"
-DEMO_PASSWORD = "MarcusDemo2026!"
+DEMO_PASSWORD = "marcus!"
 PATIENT_NAME = "Marcus R."
 # Olanzapine -> aripiprazole 10mg, then aripiprazole cut to 5mg for akathisia.
 # Each date gets its own med_change TimelineEvent (dashed marker on every chart).

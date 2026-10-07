@@ -13,6 +13,42 @@ router = APIRouter()
 MAX_CONTACTS = 20
 
 
+def delete_contact_and_scrub_logs(contact: models.SocialContact, caregiver_id: int, db: Session) -> None:
+    """Delete a contact and remove its id from that caregiver's daily_log
+    socialization entries. Shared with the demo-only clinician config router."""
+    contact_id = contact.id
+    # Remove deleted contact_id from any existing daily_log socialization entries
+    patient_ids = [
+        p.id
+        for p in db.query(models.Patient)
+        .filter(models.Patient.caregiver_id == caregiver_id)
+        .all()
+    ]
+    if patient_ids:
+        logs = (
+            db.query(models.DailyLog)
+            .filter(
+                models.DailyLog.patient_id.in_(patient_ids),
+                models.DailyLog.socialization.isnot(None),
+            )
+            .all()
+        )
+        for log in logs:
+            soc = log.socialization
+            if not soc:
+                continue
+            ids = soc.get("contact_ids") or []
+            if contact_id in ids:
+                log.socialization = {
+                    **soc,
+                    "contact_ids": [cid for cid in ids if cid != contact_id],
+                }
+                flag_modified(log, "socialization")
+
+    db.delete(contact)
+    db.commit()
+
+
 @router.get("/", response_model=List[schemas.SocialContactResponse])
 def list_contacts(
     db: Session = Depends(get_db),
@@ -68,34 +104,5 @@ def delete_contact(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
-    # Remove deleted contact_id from any existing daily_log socialization entries
-    patient_ids = [
-        p.id
-        for p in db.query(models.Patient)
-        .filter(models.Patient.caregiver_id == current_user.id)
-        .all()
-    ]
-    if patient_ids:
-        logs = (
-            db.query(models.DailyLog)
-            .filter(
-                models.DailyLog.patient_id.in_(patient_ids),
-                models.DailyLog.socialization.isnot(None),
-            )
-            .all()
-        )
-        for log in logs:
-            soc = log.socialization
-            if not soc:
-                continue
-            ids = soc.get("contact_ids") or []
-            if contact_id in ids:
-                log.socialization = {
-                    **soc,
-                    "contact_ids": [cid for cid in ids if cid != contact_id],
-                }
-                flag_modified(log, "socialization")
-
-    db.delete(contact)
-    db.commit()
+    delete_contact_and_scrub_logs(contact, current_user.id, db)
     return None

@@ -11,6 +11,10 @@ added later. Two explicit exemptions, both intentional and read-only-safe:
 - /clinicians/redeem — the one write a clinician legitimately makes: the
   read-only enforcement is about clinicians never writing a CAREGIVER's
   data, not about the clinician router having zero POST handlers at all.
+- The demo-only config routes in routers/clinician_demo_config.py. These
+  filter on Patient.is_demo in the query, so they can only ever touch fake
+  demo data; tests/test_clinician_demo_config.py proves a non-demo patient
+  is unreachable through them.
 
 If a new write endpoint is added anywhere else without a require_not_clinician
 (or equivalent) guard, this test starts failing for it automatically.
@@ -22,7 +26,14 @@ import pytest
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 EXEMPT_PREFIXES = ("/auth",)
-EXEMPT_EXACT = {("POST", "/clinicians/redeem")}
+EXEMPT_EXACT = {
+    ("POST", "/clinicians/redeem"),
+    ("PATCH", "/clinician/patient/{patient_id}/config"),
+    ("POST", "/clinician/patient/{patient_id}/medications"),
+    ("DELETE", "/clinician/patient/{patient_id}/medications/{medication_id}"),
+    ("POST", "/clinician/patient/{patient_id}/contacts"),
+    ("DELETE", "/clinician/patient/{patient_id}/contacts/{contact_id}"),
+}
 
 # Substituted into any {param} path segment so a route can actually be
 # called — the test only cares about the auth guard firing, not about the

@@ -7,17 +7,8 @@ import toast from "react-hot-toast";
 import { api } from "../../lib/api";
 import { useAuth } from "../../components/AuthProvider";
 import { NavBar } from "../../components/NavBar";
-import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS } from "../../lib/constants";
+import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS, PRESET_TRACKING, DEFAULT_TRACKING } from "../../lib/constants";
 import type { User, Patient, Medication, SocialContact } from "../../lib/types";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const PRESET_TRACKING = [
-  { key: "sleep",     label: "Sleep",     sub: "Log nightly hours of sleep" },
-  { key: "hydration", label: "Hydration", sub: "Log daily hydration level" },
-  { key: "vitals",    label: "Vitals",    sub: "Heart rate and blood pressure" },
-];
-const DEFAULT_TRACKING = ["sleep", "hydration", "vitals"];
 
 // ── UI primitives ─────────────────────────────────────────────────────────────
 

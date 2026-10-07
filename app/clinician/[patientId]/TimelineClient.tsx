@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Lora } from "next/font/google";
+import Link from "next/link";
 import { api } from "../../lib/api";
 import type { TimelineDomain, TimelineEventItem, TimelineExtremePoint, TimelineNote, TimelineResponse, TimelineWindow } from "../../lib/types";
 import { TREND_CFG, TrendAxis, TrendChart, type TrendSpec } from "./TrendChart";
@@ -508,7 +509,16 @@ export default function TimelineClient({ patientId }: { patientId: number }) {
   return (
     <div className={`${lora.variable} clinician-timeline px-4 sm:px-6 py-8 max-w-[1180px] mx-auto`}>
       {/* Header */}
-      <h1 style={{ fontSize: 22, fontWeight: 600 }}>{data.patient.name}</h1>
+      <div className="flex items-start justify-between gap-3">
+        <h1 style={{ fontSize: 22, fontWeight: 600 }}>{data.patient.name}</h1>
+        <Link
+          href={`/clinician/${patientId}/configure/`}
+          className="flex-shrink-0 px-3 py-1.5 text-sm font-semibold"
+          style={{ border: "1px solid var(--border)", borderRadius: 8, color: "var(--accent)" }}
+        >
+          Configure tracking
+        </Link>
+      </div>
       <p className="tl-tabular mt-1" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
         {fmtDate(data.patient.range_start)}–{fmtDate(data.patient.range_end)} ·{" "}
         {data.patient.days_logged} of {data.patient.days_in_range} days logged · logged by{" "}

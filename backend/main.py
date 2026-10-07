@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from database import engine, Base
 import models  # noqa: F401 — ensures models are registered before create_all
-from routers import auth, patients, medications, logs, summary, onboarding, saved_summaries, social_contacts, assessments, clinicians, clinician_timeline
+from routers import auth, patients, medications, logs, summary, onboarding, saved_summaries, social_contacts, assessments, clinicians, clinician_timeline, clinician_demo_config
 
 load_dotenv()
 
@@ -155,6 +155,7 @@ app.include_router(social_contacts.router, prefix="/api/social-contacts", tags=[
 app.include_router(assessments.router, prefix="/assessments", tags=["assessments"])
 app.include_router(clinicians.router, prefix="/clinicians", tags=["clinicians"])
 app.include_router(clinician_timeline.router, prefix="/clinician", tags=["clinician-timeline"])
+app.include_router(clinician_demo_config.router, prefix="/clinician", tags=["clinician-demo-config"])
 
 
 @app.get("/")
