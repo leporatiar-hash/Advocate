@@ -60,21 +60,21 @@ export default function PhotosPage() {
 
       <div className="max-w-lg mx-auto px-4 pt-6">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-navy">Photo Timeline</h1>
-          <p className="text-base text-slate-500 mt-1">
+          <h1 className="warm-h1 text-3xl">Photo Timeline</h1>
+          <p className="text-base warm-soft mt-1">
             {patient ? `${patient.name}'s photos over time` : "Photos over time"}
           </p>
         </div>
 
         {photosLogs.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-10 text-center">
-            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "#F1F5F9" }}>
-              <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="warm-card p-10 text-center">
+            <div className="flex justify-center mb-3">
+              <svg className="w-8 h-8" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
             </div>
-            <p className="text-slate-500 text-base">No photos yet.</p>
+            <p className="warm-h2 text-lg">No photos yet</p>
             <p className="text-slate-400 text-sm mt-1">Add a photo when logging each day.</p>
           </div>
         ) : (

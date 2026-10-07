@@ -169,9 +169,9 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
 
         {/* Intro screen — PHQ-9 hand-to-patient */}
         {phase === "intro" && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-5 text-center">
-            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center" style={{ background: "#e8f0eb" }}>
-              <svg className="w-7 h-7" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="warm-card p-6 space-y-5 text-center">
+            <div className="flex justify-center">
+              <svg className="w-8 h-8" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
@@ -182,7 +182,7 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
               type="button"
               onClick={() => setPhase("question")}
               className="w-full py-4 rounded-2xl font-bold text-white text-base"
-              style={{ background: "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+              style={{ background: "#4a7c59" }}
             >
               Begin
             </button>
@@ -191,7 +191,7 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
 
         {/* Question screen */}
         {phase === "question" && question && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-6">
+          <div className="warm-card p-6 space-y-6">
             {instrument.stem && (
               <p className="text-sm text-slate-500">{instrument.stem}</p>
             )}
@@ -227,7 +227,7 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
 
         {/* PHQ-9 completion mode toggle */}
         {phase === "mode" && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-5">
+          <div className="warm-card p-6 space-y-5">
             <p className="text-lg font-bold text-navy">Who completed this check-in?</p>
             <div className="space-y-3">
               {([
@@ -259,7 +259,7 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
               onClick={() => submit(answers, completionMode)}
               disabled={submitting}
               className="w-full py-4 rounded-2xl font-bold text-white text-base disabled:opacity-50"
-              style={{ background: "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+              style={{ background: "#4a7c59" }}
             >
               {submitting ? "Submitting…" : "Submit"}
             </button>
@@ -268,9 +268,9 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
 
         {/* Completion screen */}
         {phase === "complete" && result && (
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-5 text-center">
-            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center" style={{ background: "#e8f0eb" }}>
-              <svg className="w-7 h-7" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="warm-card p-6 space-y-5 text-center">
+            <div className="flex justify-center">
+              <svg className="w-8 h-8" style={{ color: "#4a7c59" }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
@@ -291,7 +291,7 @@ export default function AssessmentFormClient({ instrumentKey }: { instrumentKey:
               type="button"
               onClick={() => router.push("/assessments")}
               className="w-full py-4 rounded-2xl font-bold text-white text-base"
-              style={{ background: "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+              style={{ background: "#4a7c59" }}
             >
               Done
             </button>

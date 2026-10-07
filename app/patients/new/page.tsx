@@ -65,13 +65,13 @@ export default function NewPatientPage() {
 
       <div className="max-w-lg mx-auto px-4 pt-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-navy">New Patient</h1>
+          <h1 className="warm-h1 text-3xl">New Patient</h1>
           <p className="text-slate-500 text-sm mt-1">Create a patient profile and add their medications.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* Patient details */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 space-y-4">
+          <div className="warm-card p-5 space-y-4">
             <h2 className="font-semibold text-navy">Patient Details</h2>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Patient name *</label>
@@ -118,7 +118,7 @@ export default function NewPatientPage() {
           <div className="space-y-3">
             <h2 className="font-semibold text-navy px-1">Medications</h2>
             {meds.map((med, idx) => (
-              <div key={idx} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+              <div key={idx} className="warm-card p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold text-navy">Medication {idx + 1}</span>
                   {meds.length > 1 && (

@@ -322,14 +322,14 @@ function ClinicalReport({
   const hasVitals = vitals.hrMin !== null || vitals.bpValues.length > 0 || customVitalRows.length > 0;
 
   return (
-    <div className="print-page bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+    <div className="warm-card print-page p-6">
 
       {/* ── Report header ── */}
       <div className="mb-7 pb-5 border-b-2 border-slate-300">
         <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
           Caregiver Observation Report
         </p>
-        <h1 className="text-2xl font-bold text-navy">{patient.name}</h1>
+        <h1 className="warm-h1 text-3xl">{patient.name}</h1>
 
         <div className="mt-3 text-sm text-slate-600 space-y-0.5">
           {patient.diagnosis && (
@@ -610,7 +610,7 @@ export default function PrintPage() {
   if (isLoading || dataLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#F8FAFC" }}>
-        <div className="w-8 h-8 border-4 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#0D9488", borderTopColor: "transparent" }} />
+        <div className="w-8 h-8 border-4 border-t-transparent rounded-full animate-spin" style={{ borderColor: "#4a7c59", borderTopColor: "transparent" }} />
       </div>
     );
   }
@@ -629,21 +629,20 @@ export default function PrintPage() {
           {/* Controls */}
           <div className="no-print mb-6 space-y-4">
             <div>
-              <h1 className="text-3xl font-bold text-navy">Print Report</h1>
-              <p className="text-base text-slate-500 mt-1">Generate a clinical summary for the doctor.</p>
+              <h1 className="warm-h1 text-3xl">Print Report</h1>
+              <p className="text-base warm-soft mt-1">Generate a clinical summary for the doctor.</p>
             </div>
 
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+            <div className="warm-card p-4 space-y-3">
               <p className="text-sm font-semibold text-slate-600">Reporting period</p>
-              <div className="flex gap-3">
+              <div className="flex gap-1 rounded-2xl p-1" style={{ background: "#f4efe6", border: "1px solid #e9e0d0" }} role="group" aria-label="Reporting period">
                 {([7, 30] as const).map(r => (
                   <button key={r} type="button" onClick={() => setRange(r)}
-                    className="flex-1 py-3 rounded-xl border-2 text-base font-semibold transition-all"
-                    style={{
-                      borderColor: range === r ? "#0D9488" : "#CBD5E1",
-                      background: range === r ? "#0D9488" : "white",
-                      color: range === r ? "white" : "#334155",
-                    }}
+                    aria-pressed={range === r}
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold transition-all"
+                    style={range === r
+                      ? { background: "white", color: "#2d4f38", boxShadow: "0 1px 2px rgba(26,36,32,0.08)" }
+                      : { background: "transparent", color: "#6b7d74" }}
                   >Last {r} days</button>
                 ))}
               </div>
@@ -657,7 +656,7 @@ export default function PrintPage() {
               type="button"
               onClick={() => window.print()}
               className="w-full py-4 rounded-2xl font-bold text-white text-lg shadow-lg transition-all active:scale-[0.98]"
-              style={{ background: "linear-gradient(135deg, #0D9488, #0B7A70)" }}
+              style={{ background: "#4a7c59" }}
             >
               Print / Save as PDF
             </button>

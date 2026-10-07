@@ -42,8 +42,10 @@ function StatusCard({ item }: { item: AssessmentStatusItem }) {
       </div>
       <Link
         href={`/assessments/${item.instrument_key}`}
-        className="px-4 py-2.5 rounded-xl font-semibold text-sm text-white flex-shrink-0"
-        style={{ background: item.due ? "#4a7c59" : "#94A3B8" }}
+        className="px-4 py-2.5 rounded-xl font-semibold text-sm flex-shrink-0 border"
+        style={item.due
+          ? { background: "#4a7c59", color: "white", borderColor: "#4a7c59" }
+          : { background: "white", color: "#4a7c59", borderColor: "#d4e0d7" }}
       >
         Start
       </Link>
@@ -154,7 +156,7 @@ export default function AssessmentsPage() {
             </svg>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold text-navy">Assessments</h1>
+            <h1 className="warm-h1 text-3xl">Assessments</h1>
             {patient && <p className="text-base text-slate-500 mt-1">{patient.name}</p>}
           </div>
         </div>
@@ -176,7 +178,7 @@ export default function AssessmentsPage() {
         {history.length > 0 && (
           <div className="space-y-2 pt-2">
             <h2 className="text-lg font-bold text-navy px-1">History</h2>
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="warm-card overflow-hidden">
               {INSTRUMENT_ORDER.filter((key) => historyByInstrument.has(key)).map((key) => {
                 const entries = historyByInstrument.get(key)!;
                 const statusItem = status.find((s) => s.instrument_key === key);

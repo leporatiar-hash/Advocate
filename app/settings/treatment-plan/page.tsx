@@ -37,10 +37,10 @@ function emptyDraft(): PlanDraft {
 
 function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+    <div className="warm-card overflow-hidden">
       <div className="px-5 pt-4 pb-2">
-        <p className="text-base font-bold text-navy">{title}</p>
-        {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+        <h2 className="warm-h2 text-lg">{title}</h2>
+        {subtitle && <p className="text-sm warm-soft mt-0.5">{subtitle}</p>}
       </div>
       <div className="px-5 pb-5 space-y-3">{children}</div>
     </div>
@@ -128,7 +128,7 @@ function ClinicianCard({
     <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 space-y-3">
       {/* Role */}
       <div className="space-y-2">
-        <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Role</label>
+        <label className="text-sm font-medium warm-soft">Role</label>
         <div className="flex flex-wrap gap-2">
           {COMMON_ROLES.map(r => (
             <button
@@ -329,7 +329,7 @@ export default function TreatmentPlanPage() {
             </svg>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-navy">Treatment Plan</h1>
+            <h1 className="warm-h1 text-3xl">Treatment Plan</h1>
             {patient && <p className="text-sm text-slate-500">For {patient.name}</p>}
           </div>
         </div>
@@ -429,7 +429,7 @@ export default function TreatmentPlanPage() {
           onClick={handleSave}
           disabled={saving}
           className="w-full py-5 rounded-2xl font-bold text-white text-xl shadow-xl transition-all active:scale-[0.98] disabled:opacity-60"
-          style={{ background: "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+          style={{ background: "#4a7c59" }}
         >
           {saving ? "Saving…" : "Save Treatment Plan"}
         </button>

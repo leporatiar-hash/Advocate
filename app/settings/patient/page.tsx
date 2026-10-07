@@ -82,20 +82,20 @@ export default function PatientProfilePage() {
             </svg>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-navy">Patient Profile</h1>
-            <p className="text-sm text-slate-500">Update your patient&apos;s basic information</p>
+            <h1 className="warm-h1 text-3xl">Profile</h1>
+            <p className="text-sm warm-soft">Update your patient&apos;s basic information</p>
           </div>
         </div>
 
         {!patient ? (
-          <div className="bg-white rounded-2xl border border-slate-100 px-5 py-8 text-center">
+          <div className="warm-card px-5 py-8 text-center">
             <p className="text-slate-400">No patient found. Complete onboarding first.</p>
           </div>
         ) : (
           <>
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="warm-card overflow-hidden">
               <div className="px-5 pt-5 pb-3">
-                <p className="text-lg font-bold text-navy">Basic Info</p>
+                <h2 className="warm-h2 text-lg">Basic info</h2>
               </div>
               <div className="px-5 pb-5 space-y-4">
 
@@ -149,7 +149,7 @@ export default function PatientProfilePage() {
               onClick={handleSave}
               disabled={saving || !name.trim() || !diagnosis.trim()}
               className="w-full py-5 rounded-2xl font-bold text-white text-xl shadow-xl transition-all active:scale-[0.98] disabled:opacity-50"
-              style={{ background: saving ? "#2d4f38" : "linear-gradient(135deg, #4a7c59, #2d4f38)" }}
+              style={{ background: saving ? "#2d4f38" : "#4a7c59" }}
             >
               {saving ? "Saving…" : "Save Changes"}
             </button>

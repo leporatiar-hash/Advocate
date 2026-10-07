@@ -112,18 +112,18 @@ export default function SharingPage() {
 
   if (isLoading || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--canvas)" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#faf9f6" }}>
         <div className="w-8 h-8 border-4 border-t-transparent rounded-full animate-spin" style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen pb-24" style={{ background: "var(--canvas)" }}>
+    <div className="min-h-screen pb-24" style={{ background: "#faf9f6" }}>
       <NavBar />
       <div className="max-w-xl mx-auto px-4 pt-6">
         <Link href="/settings" className="text-sm" style={{ color: "var(--ink-muted)" }}>← Settings</Link>
-        <h1 className="text-2xl font-bold mt-2" style={{ color: "var(--ink)" }}>Share with a clinician</h1>
+        <h1 className="warm-h1 text-3xl mt-2">Share with a clinician</h1>
         <p className="text-sm mt-1" style={{ color: "var(--ink-muted)" }}>
           Give your clinician a code and they can read {patient ? patient.name : "your loved one"}&apos;s
           summaries before an appointment. They see a read-only view — they can never edit anything, and
@@ -131,7 +131,7 @@ export default function SharingPage() {
         </p>
 
         {!patient && (
-          <div className="rounded-2xl border p-6 mt-6 text-center" style={{ background: "#fff", borderColor: "var(--line-strong)" }}>
+          <div className="warm-card p-6 mt-6 text-center">
             <p className="text-sm" style={{ color: "var(--ink-muted)" }}>Add a patient first, then you can share.</p>
           </div>
         )}
@@ -139,8 +139,8 @@ export default function SharingPage() {
         {patient && (
           <>
             {/* The invitation */}
-            <div className="rounded-2xl border p-5 mt-6" style={{ background: "#fff", borderColor: "var(--line-strong)" }}>
-              <h2 className="text-sm font-bold uppercase tracking-wide" style={{ color: "var(--ink-muted)" }}>
+            <div className="warm-card p-5 mt-6">
+              <h2 className="warm-h2 text-lg">
                 Your sharing code
               </h2>
 
@@ -205,8 +205,8 @@ export default function SharingPage() {
             </div>
 
             {/* Who actually has access */}
-            <div className="rounded-2xl border p-5 mt-4" style={{ background: "#fff", borderColor: "var(--line-strong)" }}>
-              <h2 className="text-sm font-bold uppercase tracking-wide" style={{ color: "var(--ink-muted)" }}>
+            <div className="warm-card p-5 mt-4">
+              <h2 className="warm-h2 text-lg">
                 Who can see {patient.name}
               </h2>
               {clinicians.length === 0 ? (

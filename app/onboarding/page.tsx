@@ -166,7 +166,7 @@ export default function OnboardingPage() {
       {step === 1 && (
         <>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-navy">Who are you caring for?</h1>
+            <h1 className="warm-h1 text-3xl">Who are you caring for?</h1>
             <p className="text-slate-500 text-sm mt-1">Set up the patient profile you&apos;ll be tracking.</p>
           </div>
 
@@ -228,7 +228,7 @@ export default function OnboardingPage() {
       {step === 2 && (
         <>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-navy">Personalize your dashboard</h1>
+            <h1 className="warm-h1 text-3xl">Personalize your dashboard</h1>
             <p className="text-slate-500 text-sm mt-1">
               A few quick questions so we can set up the right tracking for {patientName}.
             </p>
@@ -383,13 +383,13 @@ export default function OnboardingPage() {
       {step === 4 && (
         <>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-navy">Add medications</h1>
+            <h1 className="warm-h1 text-3xl">Add medications</h1>
             <p className="text-slate-500 text-sm mt-1">List every medication. You can always add more later.</p>
           </div>
 
           <form onSubmit={handleMedsSubmit} className="space-y-4">
             {meds.map((med, idx) => (
-              <div key={idx} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+              <div key={idx} className="warm-card p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold text-navy">Medication {idx + 1}</span>
                   {meds.length > 1 && (

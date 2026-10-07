@@ -16,10 +16,10 @@ import type { User, Patient, SocialContact, CustomVital } from "../../lib/types"
 
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+    <div className="warm-card overflow-hidden">
       <div className="px-5 pt-5 pb-3">
-        <p className="text-lg font-bold text-navy">{title}</p>
-        {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
+        <h2 className="warm-h2 text-lg">{title}</h2>
+        {subtitle && <p className="text-sm warm-soft mt-0.5">{subtitle}</p>}
       </div>
       <div className="px-5 pb-5 space-y-4">{children}</div>
     </div>
@@ -325,8 +325,8 @@ export default function CustomizePage() {
             </svg>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-navy">Customize Dashboard</h1>
-            <p className="text-sm text-slate-500">Everything logged daily is configured here</p>
+            <h1 className="warm-h1 text-3xl">Medications &amp; daily log</h1>
+            <p className="text-sm warm-soft">Everything logged daily is configured here</p>
           </div>
         </div>
 
@@ -409,7 +409,7 @@ export default function CustomizePage() {
           {/* Custom vitals */}
           <div className="pt-1 space-y-3">
             <div>
-              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Custom Vitals &amp; Lab Values</p>
+              <p className="text-sm font-semibold warm-soft">Custom Vitals &amp; Lab Values</p>
               <p className="text-sm text-slate-400 mt-0.5">Shown in the daily log&apos;s Vitals section. Fill them in only when measured.</p>
             </div>
             {customVitals.length > 0 && (
@@ -528,7 +528,7 @@ export default function CustomizePage() {
           </div>
 
           <div className="pt-1 space-y-3">
-            <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Social Contacts</p>
+            <p className="text-sm font-semibold warm-soft">Social Contacts</p>
             <p className="text-sm text-slate-400">People who appear as contact options in the log</p>
             {contacts.length > 0 && (
               <div className="-mt-1">
@@ -576,7 +576,7 @@ export default function CustomizePage() {
           onClick={handleSave}
           disabled={saving}
           className="w-full py-5 rounded-2xl font-bold text-white text-xl shadow-xl transition-all active:scale-[0.98]"
-          style={{ background: saving ? "#2d4f38" : "linear-gradient(135deg, #4a7c59, #2d4f38)", opacity: saving ? 0.9 : 1 }}
+          style={{ background: saving ? "#2d4f38" : "#4a7c59", opacity: saving ? 0.9 : 1 }}
         >
           {saving ? "Saving…" : "Save Changes"}
         </button>
