@@ -10,6 +10,7 @@ import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
 import Link from "next/link";
 import { MedicationManager } from "../components/MedicationForm";
+import { DictationButton } from "../components/DictationButton";
 import { formatShortDate, isAsNeeded, isDue, nextDueDate, scheduleLabel } from "../lib/medSchedule";
 import { customReadings, normalizeCustomVitals, vitalLabel } from "../lib/customVitals";
 import type { CustomVitalReading, Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome } from "../lib/types";
@@ -614,6 +615,12 @@ function LogPageInner() {
 
   function update(patch: Partial<LogDraft>) {
     setDraft(d => d ? { ...d, ...patch } : d);
+    isDirtyRef.current = true;
+  }
+
+  // Dictated text is appended to whatever is already typed, within the 500-char cap.
+  function appendNote(text: string) {
+    setDraft(d => d ? { ...d, notes: (d.notes.trim() ? `${d.notes.trimEnd()} ${text}` : text).slice(0, 500) } : d);
     isDirtyRef.current = true;
   }
 
@@ -2211,9 +2218,9 @@ function LogPageInner() {
           bgColor="white" borderColor="#d4e0d7" headingColor="#1a2420"
           isOpen={openSection === "notes"} onToggle={() => toggle("notes")}>
 
-          <div className="flex justify-between mb-1">
-            <span className="text-sm text-slate-500" />
-            <span className="text-sm text-slate-400">{draft.notes.length}/500</span>
+          <div className="flex justify-between items-start mb-1 gap-3">
+            <DictationButton onText={appendNote} />
+            <span className="text-sm text-slate-400 flex-shrink-0">{draft.notes.length}/500</span>
           </div>
           <textarea
             value={draft.notes}
