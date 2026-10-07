@@ -33,6 +33,10 @@ _MIGRATIONS = [
     "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'clinician'",
     "ALTER TABLE treatment_plans ADD COLUMN IF NOT EXISTS last_appointment_date DATE",
     "ALTER TABLE patients ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE medications ADD COLUMN IF NOT EXISTS schedule_type VARCHAR",
+    "ALTER TABLE medications ADD COLUMN IF NOT EXISTS schedule_interval_days INTEGER",
+    "ALTER TABLE medications ADD COLUMN IF NOT EXISTS schedule_start_date DATE",
+    "ALTER TABLE medications ADD COLUMN IF NOT EXISTS schedule_weekdays JSON",
 ]
 
 _SEED_DEFAULT_CONTACTS = """

@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { api } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
-import type { Patient, DailyLog, Medication, MedicationTaken } from "../lib/types";
+import { adherenceEntries, removeFalseMisses } from "../lib/medSchedule";
+import { customReadings, formatReading } from "../lib/customVitals";
+import type { Patient, DailyLog, Medication } from "../lib/types";
 
 const SIMPLE_TIME_LABELS: Record<string, string> = {
   "08:00": "Morning",
@@ -40,8 +42,9 @@ function moodColor(score: number) {
 }
 
 
-function medsStatus(log: DailyLog) {
-  const meds = (log.medications_taken ?? []) as MedicationTaken[];
+// Scheduled doses only — off-day and as-needed entries aren't misses.
+function medsStatus(log: DailyLog, medications: Medication[]) {
+  const meds = adherenceEntries(log.medications_taken, medications, log.date);
   if (!meds.length) return null;
   const taken = meds.filter(m => m.taken).length;
   return { taken, total: meds.length, allTaken: taken === meds.length };
@@ -50,6 +53,13 @@ function medsStatus(log: DailyLog) {
 // ── Expanded log detail ────────────────────────────────────────────────────────
 
 function LogDetail({ log, medications }: { log: DailyLog; medications: Medication[] }) {
+  const doses = removeFalseMisses(log.medications_taken, medications, log.date);
+  const v = log.vitals;
+  const vitalParts = [
+    v?.heart_rate && `HR ${v.heart_rate} bpm`,
+    v?.blood_pressure && `BP ${v.blood_pressure}`,
+    ...Object.entries(customReadings(v)).map(([name, r]) => `${name} ${formatReading(r)}`),
+  ].filter(Boolean) as string[];
   return (
     <div className="mt-3 space-y-3 text-sm border-t border-slate-100 pt-3">
 
@@ -81,12 +91,19 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
         </div>
       )}
 
+      {vitalParts.length > 0 && (
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Vitals</p>
+          <p className="text-sm text-slate-700">{vitalParts.join(" · ")}</p>
+        </div>
+      )}
+
       {/* Medications */}
-      {(log.medications_taken ?? []).length > 0 && (
+      {doses.length > 0 && (
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Medications</p>
           <div className="space-y-1">
-            {(log.medications_taken as MedicationTaken[]).map((m, i) => (
+            {doses.map((m, i) => (
               <div key={i} className="flex items-center gap-2">
                 <span
                   className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
@@ -182,7 +199,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
 function DayRow({ log, medications }: { log: DailyLog; medications: Medication[] }) {
   const [open, setOpen] = useState(false);
 
-  const meds = medsStatus(log);
+  const meds = medsStatus(log, medications);
   const symptomCount = (log.symptoms ?? []).length;
   const maxSeverity = symptomCount > 0 ? Math.max(...(log.symptoms ?? []).map(s => s.severity ?? 0)) : 0;
   const hasEpisode = log.episode?.occurred;

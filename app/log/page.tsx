@@ -8,7 +8,11 @@ import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
-import type { Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome } from "../lib/types";
+import Link from "next/link";
+import { MedicationManager } from "../components/MedicationForm";
+import { formatShortDate, isAsNeeded, isDue, nextDueDate, scheduleLabel } from "../lib/medSchedule";
+import { customReadings, normalizeCustomVitals, vitalLabel } from "../lib/customVitals";
+import type { CustomVitalReading, Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome } from "../lib/types";
 import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS } from "../lib/constants";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -292,6 +296,8 @@ interface Vitals {
   alcohol: boolean;
   alcohol_drinks: string;
   custom_substances?: Record<string, boolean>;
+  // Caregiver-defined vitals/lab values, keyed by name (see lib/customVitals.ts)
+  custom?: Record<string, CustomVitalReading>;
 }
 
 
@@ -422,9 +428,6 @@ function LogPageInner() {
 
   // Medication management
   const [showMedManage, setShowMedManage] = useState(false);
-  const [newMedName, setNewMedName] = useState("");
-  const [newMedTime, setNewMedTime] = useState("morning");
-  const [addingMed, setAddingMed] = useState(false);
 
   // Multi-dose: which med has "add dose" panel open + pending time
   const [addDoseOpenFor, setAddDoseOpenFor] = useState<number | null>(null);
@@ -483,6 +486,8 @@ function LogPageInner() {
         cigarettes: (vt as Vitals).cigarettes ?? "",
         alcohol: (vt as Vitals).alcohol ?? false,
         alcohol_drinks: (vt as Vitals).alcohol_drinks ?? "",
+        custom_substances: (vt as Vitals).custom_substances ?? {},
+        custom: customReadings(vt),
       } : emptyVitals(),
       photo: (logData.photo as string | null) ?? null,
       socialization: savedSoc ? {
@@ -708,15 +713,29 @@ function LogPageInner() {
     }
   }
 
+  // "Yes" marks only the meds due on this date. Either answer keeps any
+  // as-needed doses already marked — those are logged separately below.
   function handleQuickTookAll(allTaken: boolean) {
     setQuickAllTaken(allTaken);
+    const meds = patient?.medications.filter(m => m.active) ?? [];
+    const prnIds = new Set(meds.filter(m => isAsNeeded(m)).map(m => m.id));
+    const keptPrn = draft!.medicationsTaken.filter(e => prnIds.has(e.medication_id));
     if (allTaken) {
-      const meds = patient?.medications.filter(m => m.active) ?? [];
-      update({ medicationsTaken: meds.map(m => ({ medication_id: m.id, taken: true, time_taken: null })) });
+      const due = meds.filter(m => isDue(m, draft!.date));
+      update({ medicationsTaken: [...due.map(m => ({ medication_id: m.id, taken: true, time_taken: null })), ...keptPrn] });
     } else {
-      update({ medicationsTaken: [] });
+      update({ medicationsTaken: keptPrn });
       setQuickMissedText("");
     }
+  }
+
+  function toggleAsNeededGiven(medId: number) {
+    const given = draft!.medicationsTaken.some(e => e.medication_id === medId && e.taken);
+    update({
+      medicationsTaken: given
+        ? draft!.medicationsTaken.filter(e => e.medication_id !== medId)
+        : [...draft!.medicationsTaken, { medication_id: medId, taken: true, time_taken: null }],
+    });
   }
 
   // ── Symptoms ─────────────────────────────────────────────────────────────
@@ -811,44 +830,36 @@ function LogPageInner() {
     update({ vitals: { ...draft!.vitals, ...patch } });
   }
 
-  // ── Medication management ─────────────────────────────────────────────────
-
-  async function handleAddMed() {
-    if (!newMedName.trim() || !patient) return;
-    setAddingMed(true);
-    try {
-      const added = await api.addMedication(patient.id, {
-        name: newMedName.trim(),
-        dose: "",
-        frequency: "daily",
-        time_of_day: newMedTime,
-      }) as Medication;
-      setPatient({ ...patient, medications: [...patient.medications, added] });
-      update({
-        medicationSideEffects: [...draft!.medicationSideEffects, { medication_id: added.id, medication_name: added.name, side_effects: [] }],
-      });
-      setNewMedName("");
-      toast.success(`${added.name} added`);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to add medication");
-    } finally {
-      setAddingMed(false);
-    }
+  // Clearing a field removes the reading rather than saving a blank.
+  function updateCustomVital(name: string, value: string, unit?: string) {
+    const custom = { ...(draft!.vitals.custom ?? {}) };
+    if (value.trim()) custom[name] = { value, unit: unit || null };
+    else delete custom[name];
+    updateVitals({ custom });
   }
 
-  async function handleRemoveMed(medId: number) {
-    if (!patient) return;
-    try {
-      await api.deleteMedication(medId);
-      setPatient({ ...patient, medications: patient.medications.map(m => m.id === medId ? { ...m, active: false } : m) });
-      update({
-        medicationsTaken: draft!.medicationsTaken.filter(m => m.medication_id !== medId),
-        medicationSideEffects: draft!.medicationSideEffects.filter(m => m.medication_id !== medId),
-      });
-      toast.success("Medication removed");
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to remove medication");
-    }
+  // ── Medication management ─────────────────────────────────────────────────
+
+  function handleMedAdded(added: Medication) {
+    setPatient(p => p && { ...p, medications: [...p.medications, added] });
+    update({
+      medicationSideEffects: [...draft!.medicationSideEffects, { medication_id: added.id, medication_name: added.name, side_effects: [] }],
+    });
+  }
+
+  function handleMedUpdated(updated: Medication) {
+    setPatient(p => p && { ...p, medications: p.medications.map(m => m.id === updated.id ? updated : m) });
+    update({
+      medicationSideEffects: draft!.medicationSideEffects.map(m => m.medication_id === updated.id ? { ...m, medication_name: updated.name } : m),
+    });
+  }
+
+  function handleMedRemoved(medId: number) {
+    setPatient(p => p && { ...p, medications: p.medications.map(m => m.id === medId ? { ...m, active: false } : m) });
+    update({
+      medicationsTaken: draft!.medicationsTaken.filter(m => m.medication_id !== medId),
+      medicationSideEffects: draft!.medicationSideEffects.filter(m => m.medication_id !== medId),
+    });
   }
 
   async function handlePhotoFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -881,9 +892,10 @@ function LogPageInner() {
   async function performSave(d: LogDraft, p: Patient): Promise<void> {
     const activeMeds = p.medications.filter(m => m.active);
     const medsWithDoses = new Set(d.medicationsTaken.map(e => e.medication_id));
-    // Include untaken entries for meds with no doses (for adherence tracking)
+    // Include untaken entries for meds with no doses (for adherence tracking) —
+    // only meds actually due that day. Off-day and as-needed meds aren't misses.
     const notTakenEntries: MedicationTaken[] = activeMeds
-      .filter(m => !medsWithDoses.has(m.id))
+      .filter(m => !medsWithDoses.has(m.id) && isDue(m, d.date))
       .map(m => ({ medication_id: m.id, taken: false, time_taken: null }));
     const hydrationOz = d.hydration === "Good" ? 80 : d.hydration === "Fair" ? 48 : d.hydration === "Poor" ? 24 : null;
     await api.createLog({
@@ -899,7 +911,7 @@ function LogPageInner() {
       lifestyle: null,
       notes: d.notes || null,
       episode: d.episode,
-      vitals: (d.vitals.heart_rate || d.vitals.blood_pressure || d.vitals.cigarettes || d.vitals.alcohol || d.vitals.alcohol_drinks || Object.values(d.vitals.custom_substances ?? {}).some(Boolean))
+      vitals: (d.vitals.heart_rate || d.vitals.blood_pressure || d.vitals.cigarettes || d.vitals.alcohol || d.vitals.alcohol_drinks || Object.values(d.vitals.custom_substances ?? {}).some(Boolean) || Object.keys(d.vitals.custom ?? {}).length > 0)
         ? d.vitals
         : null,
       photo: d.photo || null,
@@ -1147,7 +1159,19 @@ function LogPageInner() {
     );
   }
 
-  const activeMeds = patient.medications.filter(m => m.active);
+  // Due today first, then as-needed, then not due — each group in its original order.
+  const medRank = (m: Medication) => isDue(m, draft.date) ? 0 : isAsNeeded(m) ? 1 : 2;
+  const activeMeds = patient.medications.filter(m => m.active).sort((a, b) => medRank(a) - medRank(b));
+  const dueMeds = activeMeds.filter(m => isDue(m, draft.date));
+  const prnMeds = activeMeds.filter(m => isAsNeeded(m));
+  const offDayMeds = activeMeds.filter(m => !isDue(m, draft.date) && !isAsNeeded(m));
+  const isTodayLog = draft.date === localDateStr();
+  const offDayNote = (m: Medication) => {
+    const next = nextDueDate(m, draft.date);
+    return `Not due ${isTodayLog ? "today" : "this day"} (${scheduleLabel(m).toLowerCase()})${next ? ` · next ${formatShortDate(next)}` : ""}`;
+  };
+
+  const customVitals = normalizeCustomVitals(user?.user_config?.custom_vitals);
 
   // Dynamic symptom/activity lists — user_config first, fall back to patient config, then defaults
   // Use .length check so empty arrays fall through to the next level (same as missing)
@@ -1198,9 +1222,12 @@ function LogPageInner() {
   const notesText = draft.notes ? draft.notes.slice(0, 40) + (draft.notes.length > 40 ? "…" : "") : "Tap to add";
   const photoText = draft.photo ? "Photo saved" : "No photo yet";
   const episodeText = draft.episode.occurred ? `Episode at ${draft.episode.time ? fmt12(draft.episode.time) : "unknown time"}` : "No episode today";
-  const vitalsText = draft.vitals.heart_rate || draft.vitals.blood_pressure
-    ? [draft.vitals.heart_rate && `HR ${draft.vitals.heart_rate}`, draft.vitals.blood_pressure && `BP ${draft.vitals.blood_pressure}`].filter(Boolean).join(" · ")
-    : "Tap to record";
+  const vitalsParts = [
+    draft.vitals.heart_rate && `HR ${draft.vitals.heart_rate}`,
+    draft.vitals.blood_pressure && `BP ${draft.vitals.blood_pressure}`,
+    ...Object.entries(draft.vitals.custom ?? {}).map(([name, r]) => `${name} ${r.value}${r.unit ? ` ${r.unit}` : ""}`),
+  ].filter(Boolean);
+  const vitalsText = vitalsParts.length ? vitalsParts.join(" · ") : "Tap to record";
   const sleepText = draft.sleepHours !== null ? `${draft.sleepHours} hrs` : "Tap to record";
   const hydrationText = draft.hydration ?? "Tap to record";
   const substancesText = (() => {
@@ -1382,9 +1409,16 @@ function LogPageInner() {
             <div className="space-y-4">
               {activeMeds.length === 0 ? (
                 <p className="text-base text-slate-400">No active medications on file.</p>
+              ) : dueMeds.length === 0 ? (
+                <p className="text-base text-slate-500 rounded-2xl border-2 p-4" style={{ borderColor: "#d4e0d7", background: "#f8fcf9" }}>
+                  No scheduled medications are due {isTodayLog ? "today" : "on this day"}.
+                </p>
               ) : (
                 <div className="rounded-2xl border-2 p-5 space-y-4" style={{ borderColor: "#d4e0d7", background: "#f8fcf9" }}>
-                  <p className="text-lg font-bold text-navy">Took all meds today?</p>
+                  <div>
+                    <p className="text-lg font-bold text-navy">Took all meds {isTodayLog ? "today" : "this day"}?</p>
+                    <p className="text-sm text-slate-500 mt-0.5">{dueMeds.map(m => m.name).join(", ")}</p>
+                  </div>
                   <div className="flex gap-3">
                     <button
                       type="button"
@@ -1425,6 +1459,43 @@ function LogPageInner() {
                   )}
                 </div>
               )}
+
+              {offDayMeds.length > 0 && (
+                <div className="rounded-xl px-4 py-3 space-y-1" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+                  <p className="text-sm font-semibold text-slate-500">Not due {isTodayLog ? "today" : "this day"}</p>
+                  {offDayMeds.map(m => {
+                    const next = nextDueDate(m, draft.date);
+                    return (
+                      <p key={m.id} className="text-sm text-slate-500">
+                        {m.name} · {scheduleLabel(m).toLowerCase()}{next ? ` · next ${formatShortDate(next)}` : ""}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+
+              {prnMeds.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-600">As needed · only log if given</p>
+                  <div className="flex flex-wrap gap-2">
+                    {prnMeds.map(m => {
+                      const given = draft.medicationsTaken.some(e => e.medication_id === m.id && e.taken);
+                      return (
+                        <button key={m.id} type="button" onClick={() => toggleAsNeededGiven(m.id)}
+                          aria-pressed={given}
+                          className="px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95"
+                          style={{
+                            borderColor: given ? "#4a7c59" : "#CBD5E1",
+                            background: given ? "#4a7c59" : "white",
+                            color: given ? "white" : "#475569",
+                          }}>
+                          {given ? `✓ ${m.name} given` : `${m.name} given ${isTodayLog ? "today" : "this day"}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -1437,30 +1508,38 @@ function LogPageInner() {
             const mse = draft.medicationSideEffects.find(m => m.medication_id === med.id);
             const seOpen = expandedSE === med.id;
             const doseOpen = addDoseOpenFor === med.id;
+            const prn = isAsNeeded(med);
+            const offDay = !prn && !isDue(med, draft.date);
 
             return (
-              <div key={med.id} className="space-y-3">
+              <div key={med.id} className="space-y-3" style={offDay && doses.length === 0 ? { opacity: 0.75 } : undefined}>
                 {idx > 0 && <div className="border-t border-amber-100" />}
 
                 {/* Med name + dose count */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-base font-semibold text-navy">{med.name}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className={`text-base font-semibold ${offDay ? "text-slate-500" : "text-navy"}`}>{med.name}</p>
                     {doses.length > 0 ? (
                       <p className="text-sm" style={{ color: "#4a7c59" }}>
-                        taken {doses.length}× today at {doses.map(d => displayDoseTime(d.time_taken)).join(", ")}
+                        {prn ? "given" : "taken"} {doses.length}× {isTodayLog ? "today" : ""} at {doses.map(d => displayDoseTime(d.time_taken)).join(", ")}
                       </p>
+                    ) : prn ? (
+                      <p className="text-sm text-slate-500">As needed · only log if given</p>
+                    ) : offDay ? (
+                      <p className="text-sm text-slate-400">{offDayNote(med)}</p>
                     ) : (
-                      <p className="text-sm text-slate-400">{med.time_of_day} · not logged yet</p>
+                      <p className="text-sm text-slate-400">{[med.time_of_day, "not logged yet"].filter(Boolean).join(" · ")}</p>
                     )}
                   </div>
                   <button
                     type="button"
                     onClick={() => doseOpen ? setAddDoseOpenFor(null) : openAddDose(med.id)}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
-                    style={{ background: "#4a7c59" }}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 flex-shrink-0"
+                    style={offDay
+                      ? { background: "white", color: "#4a7c59", border: "1px solid #d4e0d7" }
+                      : { background: "#4a7c59", color: "white" }}
                   >
-                    + Dose
+                    {prn ? "+ Given" : "+ Dose"}
                   </button>
                 </div>
 
@@ -1632,35 +1711,14 @@ function LogPageInner() {
             </button>
 
             {showMedManage && (
-              <div className="mt-3 space-y-3">
-                {patient.medications.filter(m => m.active).map(med => (
-                  <div key={med.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2.5 border border-amber-100">
-                    <span className="text-sm font-medium text-navy">{med.name} <span className="text-slate-400 font-normal">· {med.time_of_day}</span></span>
-                    <button type="button" onClick={() => handleRemoveMed(med.id)}
-                      className="text-red-400 hover:text-red-600 text-lg leading-none transition-colors" title="Remove">×</button>
-                  </div>
-                ))}
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Add medication</p>
-                  <input
-                    type="text" value={newMedName} onChange={e => setNewMedName(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddMed(); } }}
-                    placeholder="Medication name"
-                    className="w-full px-3 py-2 rounded-xl border border-amber-200 text-navy text-sm focus:outline-none bg-white"
-                  />
-                  <div className="flex gap-2">
-                    {["morning", "noon", "night"].map(t => (
-                      <button key={t} type="button" onClick={() => setNewMedTime(t)}
-                        className="flex-1 py-2 rounded-xl border text-sm font-medium capitalize transition-all"
-                        style={{ borderColor: newMedTime === t ? "#4a7c59" : "#CBD5E1", background: newMedTime === t ? "#4a7c59" : "white", color: newMedTime === t ? "white" : "#64748B" }}
-                      >{t}</button>
-                    ))}
-                  </div>
-                  <button type="button" onClick={handleAddMed} disabled={addingMed || !newMedName.trim()}
-                    className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-                    style={{ background: newMedName.trim() ? "#4a7c59" : "#CBD5E1" }}
-                  >{addingMed ? "Adding…" : "Add medication"}</button>
-                </div>
+              <div className="mt-3">
+                <MedicationManager
+                  patientId={patient.id}
+                  medications={patient.medications}
+                  onAdded={handleMedAdded}
+                  onUpdated={handleMedUpdated}
+                  onRemoved={handleMedRemoved}
+                />
               </div>
             )}
           </div>
@@ -1813,6 +1871,38 @@ function LogPageInner() {
                 className="w-full px-4 py-3 rounded-xl border border-sky-200 text-navy text-base focus:outline-none bg-white"
               />
             </div>
+            {customVitals.map(v => {
+              const reading = draft.vitals.custom?.[v.name];
+              const id = `custom-vital-${v.name.replace(/\W+/g, "-")}`;
+              return (
+                <div key={v.name} className="space-y-1.5">
+                  <label htmlFor={id} className="text-base font-semibold text-slate-700">
+                    {v.name}{v.unit && <span className="text-sm font-normal text-slate-400"> ({v.unit})</span>}
+                  </label>
+                  <input id={id}
+                    type="text" inputMode={v.type === "number" ? "decimal" : "text"}
+                    value={reading?.value ?? ""}
+                    onChange={e => {
+                      const val = v.type === "number" ? e.target.value.replace(/[^0-9.,-]/g, "") : e.target.value;
+                      // Keep the unit the reading was first saved with; a later
+                      // Settings change shouldn't relabel it.
+                      updateCustomVital(v.name, val, reading?.unit ?? v.unit);
+                    }}
+                    placeholder="Leave blank if not measured"
+                    className="w-full px-4 py-3 rounded-xl border border-sky-200 text-navy text-base focus:outline-none bg-white"
+                  />
+                </div>
+              );
+            })}
+            {/* Readings stored for a vital since removed from Settings stay visible here. */}
+            {Object.entries(draft.vitals.custom ?? {})
+              .filter(([name]) => !customVitals.some(v => v.name === name))
+              .map(([name, r]) => (
+                <p key={name} className="text-sm text-slate-500">{vitalLabel(name, r.unit)}: {r.value}</p>
+              ))}
+            <Link href="/settings/customize" className="inline-block text-sm font-semibold" style={{ color: "#4a7c59" }}>
+              {customVitals.length ? "Add or change vitals in Settings →" : "Track lab values or other vitals? Add them in Settings →"}
+            </Link>
           </div>
         </AccordionSection>
 

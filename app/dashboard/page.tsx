@@ -7,6 +7,9 @@ import toast from "react-hot-toast";
 import { api, calculateStreak, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
+import { VitalTrendChart, type VitalPoint } from "../components/VitalTrendChart";
+import { adherenceEntries } from "../lib/medSchedule";
+import { customReadings, normalizeCustomVitals } from "../lib/customVitals";
 import type { Patient, DailyLog } from "../lib/types";
 
 // ── Photo compression (shared with log page) ─────────────────────────────────
@@ -293,19 +296,45 @@ export default function DashboardPage() {
     return logs.filter((l) => l.date >= localDateStr(start));
   })();
 
+  // Scheduled doses only: off-day and as-needed entries never count as misses.
+  const allMeds = patient?.medications ?? [];
   const monthAdherence = (() => {
     let taken = 0, total = 0;
     thisMonth.forEach((l) => {
-      (l.medications_taken || []).forEach((m) => { total++; if (m.taken) taken++; });
+      adherenceEntries(l.medications_taken, allMeds, l.date).forEach((m) => { total++; if (m.taken) taken++; });
     });
     return total > 0 ? Math.round((taken / total) * 100) : null;
   })();
 
   // Today checklist items
+  const todayDoses = todayLog ? adherenceEntries(todayLog.medications_taken, allMeds, todayLog.date) : [];
   const medsDone = !!(todayLog?.medications_taken?.some(m => m.taken));
   const medsSummary = todayLog?.medications_taken
-    ? `${todayLog.medications_taken.filter(m => m.taken).length} of ${todayLog.medications_taken.length} taken`
+    ? todayDoses.length
+      ? `${todayDoses.filter(m => m.taken).length} of ${todayDoses.length} taken`
+      : medsDone ? "As-needed dose logged" : "None due"
     : "Not recorded";
+
+  // Vitals trends — one chart per number-type custom vital, last 90 days.
+  const trendEnd = localDateStr();
+  const trendStart = (() => { const d = new Date(); d.setDate(d.getDate() - 89); return localDateStr(d); })();
+  const vitalTrends = normalizeCustomVitals(user?.user_config?.custom_vitals)
+    .filter(v => v.type === "number")
+    .map(v => {
+      let unit: string | null = v.unit ?? null;
+      const points: VitalPoint[] = logs
+        .filter(l => l.date >= trendStart && l.date <= trendEnd)
+        .flatMap(l => {
+          const r = customReadings(l.vitals)[v.name];
+          const n = r ? Number(r.value) : NaN;
+          if (!r || !Number.isFinite(n)) return [];
+          unit = r.unit ?? unit;
+          return [{ date: l.date, value: n }];
+        })
+        .sort((a, b) => a.date.localeCompare(b.date));
+      return { name: v.name, unit, points };
+    })
+    .filter(t => t.points.length > 0);
 
   const symptomsDone = !!(todayLog?.symptoms?.length);
   const symptomsSummary = symptomsDone ? "Recorded" : "Not recorded";
@@ -427,6 +456,19 @@ export default function DashboardPage() {
                 <p className="text-sm text-slate-500 mt-1">Days logged</p>
               </div>
             </div>
+
+            {vitalTrends.length > 0 && (
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-5">
+                <div>
+                  <p className="text-base font-semibold text-navy">Vitals trends</p>
+                  <p className="text-sm text-slate-500">Last 90 days · tap a point for its value</p>
+                </div>
+                {vitalTrends.map(t => (
+                  <VitalTrendChart key={t.name} name={t.name} unit={t.unit} points={t.points}
+                    startDate={trendStart} endDate={trendEnd} />
+                ))}
+              </div>
+            )}
 
             {/* Quick actions */}
             <Link

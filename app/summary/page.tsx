@@ -7,7 +7,7 @@ import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
-import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary, AssessmentDataEntry, ReviewableFact } from "../lib/types";
+import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary, AssessmentDataEntry, ReviewableFact, AsNeededUsage, CustomVitalStat } from "../lib/types";
 
 const PRINT_STYLE = `
 @media print {
@@ -147,6 +147,63 @@ function InsightCard({
         {children}
       </div>
     </div>
+  );
+}
+
+// ── As-needed medications & custom vitals (server-computed) ─────────────────
+
+function fmtShort(dateStr: string) {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function AsNeededCard({ data }: { data: Record<string, AsNeededUsage> }) {
+  const entries = Object.values(data);
+  if (!entries.length) return null;
+  return (
+    <InsightCard title="As-Needed Medications" accentColor="#2d4f38" bgColor="#f2f7f3" borderColor="#d4e0d7">
+      <p className="text-sm text-slate-500">Taken only when needed, so these are never counted as missed doses.</p>
+      <div className="space-y-3">
+        {entries.map(d => (
+          <div key={d.name}>
+            <p className="text-base font-semibold text-navy">{d.name}</p>
+            <p className="text-sm text-slate-600">
+              {d.days_given === 0
+                ? "Not given in this period"
+                : `Given ${d.times_given} time${d.times_given === 1 ? "" : "s"} on ${d.days_given} day${d.days_given === 1 ? "" : "s"}: ${d.dates.map(fmtShort).join(", ")}`}
+            </p>
+          </div>
+        ))}
+      </div>
+    </InsightCard>
+  );
+}
+
+function VitalsStatsCard({ data }: { data: Record<string, CustomVitalStat> }) {
+  const entries = Object.entries(data);
+  if (!entries.length) return null;
+  const withUnit = (v: string | number | null, unit: string | null) => v == null ? "—" : `${v}${unit ? ` ${unit}` : ""}`;
+  return (
+    <InsightCard title="Vitals & Lab Values" accentColor="#1E40AF" bgColor="#EFF6FF" borderColor="#BFDBFE">
+      <div className="space-y-4">
+        {entries.map(([name, st]) => {
+          const unit = st.latest.unit;
+          return (
+            <div key={name} className="space-y-0.5">
+              <p className="text-base font-semibold text-navy">{name}</p>
+              <p className="text-sm text-slate-700">
+                Latest <span className="font-semibold">{withUnit(st.latest.value, unit)}</span> on {fmtShort(st.latest.date)}
+                {" · "}{st.count} reading{st.count === 1 ? "" : "s"}
+              </p>
+              {st.numeric_count >= 2 && st.min != null && st.max != null && (
+                <p className="text-sm text-slate-500">
+                  Range {st.min}–{withUnit(st.max, unit)} · average {withUnit(st.avg, unit)}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </InsightCard>
   );
 }
 
@@ -638,6 +695,9 @@ export default function SummaryPage() {
                 </div>
               </InsightCard>
             )}
+
+            {summary.as_needed_usage && <AsNeededCard data={summary.as_needed_usage} />}
+            {summary.custom_vital_stats && <VitalsStatsCard data={summary.custom_vital_stats} />}
 
             {/* Medication Safety */}
             {summary.medication_side_effects && Object.keys(summary.medication_side_effects).length > 0 && (

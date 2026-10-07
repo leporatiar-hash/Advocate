@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { api } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
-import type { Patient, DailyLog, MedicationTaken, Vitals, SocialContact, Socialization } from "../lib/types";
+import { isAsNeeded, removeFalseMisses, scheduleLabel } from "../lib/medSchedule";
+import { customReadings } from "../lib/customVitals";
+import type { Patient, DailyLog, Vitals, SocialContact, Socialization } from "../lib/types";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -47,6 +49,8 @@ function computeStatusSummary(logs: DailyLog[]): { text: string; warn: boolean }
 interface MedRow {
   name: string;
   dose: string;
+  schedule: string;
+  asNeeded: boolean;
   takenDays: number;
   trackedDays: number;
   missedDates: string[];
@@ -58,18 +62,19 @@ function computeMedAggregates(logs: DailyLog[], patient: Patient): MedRow[] {
     .map(med => {
       let takenDays = 0, trackedDays = 0;
       const missedDates: string[] = [];
+      const asNeeded = isAsNeeded(med);
       for (const log of logs) {
-        const entries = (log.medications_taken ?? [] as MedicationTaken[]).filter(
-          (m: MedicationTaken) => m.medication_id === med.id
-        );
+        // Off-day and as-needed "not taken" entries are dropped — not misses.
+        const entries = removeFalseMisses(log.medications_taken, patient.medications, log.date)
+          .filter(m => m.medication_id === med.id);
         if (!entries.length) continue;
         trackedDays++;
         if (entries.some(e => e.taken)) takenDays++;
         else missedDates.push(log.date);
       }
-      return { name: med.name, dose: med.dose, takenDays, trackedDays, missedDates };
+      return { name: med.name, dose: med.dose, schedule: scheduleLabel(med), asNeeded, takenDays, trackedDays, missedDates };
     })
-    .filter(r => r.trackedDays > 0);
+    .filter(r => r.trackedDays > 0 || r.asNeeded);
 }
 
 interface SymptomRow {
@@ -141,6 +146,32 @@ function computeVitalsRange(logs: DailyLog[]): VitalsRange {
     hrAvg: hrs.length ? Math.round(hrs.reduce((a, b) => a + b) / hrs.length) : null,
     bpValues: Array.from(bpSet),
   };
+}
+
+interface CustomVitalRow {
+  name: string;
+  unit: string | null;
+  readings: { date: string; value: string }[];
+  min: number | null;
+  max: number | null;
+}
+
+function computeCustomVitals(logs: DailyLog[]): CustomVitalRow[] {
+  const map = new Map<string, CustomVitalRow>();
+  for (const log of [...logs].sort((a, b) => a.date.localeCompare(b.date))) {
+    for (const [name, r] of Object.entries(customReadings(log.vitals))) {
+      const row = map.get(name) ?? { name, unit: null, readings: [], min: null, max: null };
+      row.readings.push({ date: log.date, value: r.unit ? `${r.value} ${r.unit}` : r.value });
+      row.unit = r.unit ?? row.unit;
+      const n = Number(r.value);
+      if (r.value.trim() !== "" && Number.isFinite(n)) {
+        row.min = row.min === null ? n : Math.min(row.min, n);
+        row.max = row.max === null ? n : Math.max(row.max, n);
+      }
+      map.set(name, row);
+    }
+  }
+  return Array.from(map.values());
 }
 
 interface ActivityRow { type: string; daysActive: number }
@@ -287,7 +318,8 @@ function ClinicalReport({
     .filter(l => l.notes?.trim())
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const hasVitals = vitals.hrMin !== null || vitals.bpValues.length > 0;
+  const customVitalRows = computeCustomVitals(logs);
+  const hasVitals = vitals.hrMin !== null || vitals.bpValues.length > 0 || customVitalRows.length > 0;
 
   return (
     <div className="print-page bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
@@ -339,6 +371,7 @@ function ClinicalReport({
                   <tr>
                     <th className="text-xs text-slate-500 font-semibold">Medication</th>
                     <th className="text-xs text-slate-500 font-semibold">Dose</th>
+                    <th className="text-xs text-slate-500 font-semibold">Schedule</th>
                     <th className="text-xs text-slate-500 font-semibold">Days Taken</th>
                     <th className="text-xs text-slate-500 font-semibold">Missed Dates</th>
                   </tr>
@@ -348,9 +381,14 @@ function ClinicalReport({
                     <tr key={i}>
                       <td className="text-sm font-semibold text-navy py-2">{row.name}</td>
                       <td className="text-sm text-slate-600 py-2">{row.dose || "—"}</td>
-                      <td className="text-sm text-slate-700 py-2">{row.takenDays} of {row.trackedDays}</td>
+                      <td className="text-sm text-slate-600 py-2">{row.schedule}</td>
+                      <td className="text-sm text-slate-700 py-2">
+                        {row.asNeeded ? `Given on ${row.takenDays} day${row.takenDays === 1 ? "" : "s"}` : `${row.takenDays} of ${row.trackedDays}`}
+                      </td>
                       <td className="text-sm text-slate-500 py-2">
-                        {row.missedDates.length === 0
+                        {row.asNeeded
+                          ? <span className="text-slate-400">n/a</span>
+                          : row.missedDates.length === 0
                           ? <span className="text-slate-300">—</span>
                           : row.missedDates.map(d => fmtMed(d)).join(", ")}
                       </td>
@@ -421,6 +459,15 @@ function ClinicalReport({
                     {vitals.bpValues.join(", ")}
                   </p>
                 )}
+                {customVitalRows.map(row => (
+                  <p key={row.name} className="text-slate-700">
+                    <span className="font-semibold text-navy">{row.unit ? `${row.name} (${row.unit})` : row.name}:</span>{" "}
+                    {row.readings.map(r => `${fmtMed(r.date)}: ${r.value}`).join("; ")}
+                    {row.min !== null && row.max !== null && row.readings.length > 1 && (
+                      <span className="text-slate-500"> · range {row.min}–{row.max}{row.unit ? ` ${row.unit}` : ""}</span>
+                    )}
+                  </p>
+                ))}
               </div>
             </Section>
           )}

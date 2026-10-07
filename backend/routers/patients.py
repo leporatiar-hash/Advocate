@@ -41,6 +41,10 @@ def create_patient(
             dose=med_data.dose,
             frequency=med_data.frequency,
             time_of_day=med_data.time_of_day,
+            schedule_type=med_data.schedule_type,
+            schedule_interval_days=med_data.schedule_interval_days,
+            schedule_start_date=med_data.schedule_start_date,
+            schedule_weekdays=med_data.schedule_weekdays,
         )
         db.add(med)
 
@@ -129,6 +133,10 @@ def add_medication(
         dose=med_data.dose,
         frequency=med_data.frequency,
         time_of_day=med_data.time_of_day,
+        schedule_type=med_data.schedule_type,
+        schedule_interval_days=med_data.schedule_interval_days,
+        schedule_start_date=med_data.schedule_start_date,
+        schedule_weekdays=med_data.schedule_weekdays,
     )
     db.add(med)
     db.commit()

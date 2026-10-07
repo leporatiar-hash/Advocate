@@ -8,7 +8,9 @@ import { api } from "../../lib/api";
 import { useAuth } from "../../components/AuthProvider";
 import { NavBar } from "../../components/NavBar";
 import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS, PRESET_TRACKING, DEFAULT_TRACKING } from "../../lib/constants";
-import type { User, Patient, Medication, SocialContact } from "../../lib/types";
+import { MedicationManager } from "../../components/MedicationForm";
+import { normalizeCustomVitals, vitalLabel } from "../../lib/customVitals";
+import type { User, Patient, SocialContact, CustomVital } from "../../lib/types";
 
 // ── UI primitives ─────────────────────────────────────────────────────────────
 
@@ -105,27 +107,6 @@ function AddInput({
   );
 }
 
-function MedRow({ med, onRemove }: { med: Medication; onRemove: (id: number) => void }) {
-  return (
-    <div className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0">
-      <div>
-        <p className="text-base font-semibold text-navy">{med.name}</p>
-        <p className="text-sm text-slate-400">
-          {[med.dose, med.frequency].filter(Boolean).join(" · ")}
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={() => onRemove(med.id)}
-        className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors text-lg leading-none"
-        aria-label={`Remove ${med.name}`}
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CustomizePage() {
@@ -135,17 +116,16 @@ export default function CustomizePage() {
 
   // Patient + medications
   const [patient, setPatient] = useState<Patient | null>(null);
-  const [newMedName, setNewMedName] = useState("");
-  const [newMedDose, setNewMedDose] = useState("");
-  const [newMedFreq, setNewMedFreq] = useState("");
-  const [addingMed, setAddingMed] = useState(false);
 
   // Symptoms
   const [symptoms, setSymptoms] = useState<string[]>([]);
 
   // Tracking modules
   const [trackingModules, setTrackingModules] = useState<Set<string>>(new Set(DEFAULT_TRACKING));
-  const [customVitals, setCustomVitals] = useState<string[]>([]);
+  const [customVitals, setCustomVitals] = useState<CustomVital[]>([]);
+  const [newVitalName, setNewVitalName] = useState("");
+  const [newVitalType, setNewVitalType] = useState<"number" | "text">("number");
+  const [newVitalUnit, setNewVitalUnit] = useState("");
 
   // Activities
   const [activities, setActivities] = useState<string[]>([]);
@@ -175,7 +155,7 @@ export default function CustomizePage() {
 
     const tm = cfg?.tracking_modules;
     setTrackingModules(new Set(tm?.length ? tm : DEFAULT_TRACKING));
-    setCustomVitals(cfg?.custom_vitals ?? []);
+    setCustomVitals(normalizeCustomVitals(cfg?.custom_vitals));
 
     if (!cfg) return;
     const sf: string[] = cfg.substance_fields ?? ["cigarettes", "alcohol"];
@@ -198,39 +178,6 @@ export default function CustomizePage() {
       api.getSocialContacts().then(c => setContacts(c as SocialContact[])).catch(() => {});
     }
   }, [user, isLoading, loadFromUser, router]);
-
-  // ── Medications ───────────────────────────────────────────────────────────
-
-  async function handleAddMed() {
-    if (!newMedName.trim() || !patient) return;
-    setAddingMed(true);
-    try {
-      const added = await api.addMedication(patient.id, {
-        name: newMedName.trim(),
-        dose: newMedDose.trim(),
-        frequency: newMedFreq.trim() || "daily",
-        time_of_day: "morning",
-      }) as Medication;
-      setPatient({ ...patient, medications: [...patient.medications, added] });
-      setNewMedName(""); setNewMedDose(""); setNewMedFreq("");
-      toast.success(`${added.name} added`);
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to add medication");
-    } finally {
-      setAddingMed(false);
-    }
-  }
-
-  async function handleRemoveMed(medId: number) {
-    if (!patient) return;
-    try {
-      await api.deleteMedication(medId);
-      setPatient({ ...patient, medications: patient.medications.map(m => m.id === medId ? { ...m, active: false } : m) });
-      toast.success("Medication removed");
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to remove medication");
-    }
-  }
 
   // ── Symptoms ──────────────────────────────────────────────────────────────
 
@@ -270,11 +217,16 @@ export default function CustomizePage() {
       return next;
     });
   }
-  function addCustomVital(name: string) {
-    const n = name.charAt(0).toUpperCase() + name.slice(1);
-    if (!customVitals.includes(n)) setCustomVitals(prev => [...prev, n]);
+  const newVitalTrimmed = newVitalName.trim();
+  const newVitalDuplicate = customVitals.some(v => v.name.toLowerCase() === newVitalTrimmed.toLowerCase());
+  function addCustomVital() {
+    if (!newVitalTrimmed || newVitalDuplicate) return;
+    const name = newVitalTrimmed.charAt(0).toUpperCase() + newVitalTrimmed.slice(1);
+    const unit = newVitalUnit.trim();
+    setCustomVitals(prev => [...prev, { name, type: newVitalType, ...(unit ? { unit } : {}) }]);
+    setNewVitalName(""); setNewVitalUnit(""); setNewVitalType("number");
   }
-  function removeCustomVital(name: string) { setCustomVitals(prev => prev.filter(v => v !== name)); }
+  function removeCustomVital(name: string) { setCustomVitals(prev => prev.filter(v => v.name !== name)); }
 
   // ── Activities ────────────────────────────────────────────────────────────
 
@@ -362,7 +314,6 @@ export default function CustomizePage() {
     );
   }
 
-  const activeMeds = patient?.medications.filter(m => m.active) ?? [];
 
   return (
     <div className="min-h-screen pb-28" style={{ background: "#faf9f6" }}>
@@ -384,55 +335,15 @@ export default function CustomizePage() {
         </div>
 
         {/* ── Medications ── */}
-        <Section title="Medications" subtitle="Add or remove medications tracked in the daily log">
+        <Section title="Medications" subtitle="Tap a medication to change its dose or how often it's taken">
           {patient ? (
-            <>
-              {activeMeds.length > 0 && (
-                <div className="-mt-1">
-                  {activeMeds.map(med => (
-                    <MedRow key={med.id} med={med} onRemove={handleRemoveMed} />
-                  ))}
-                </div>
-              )}
-              {activeMeds.length === 0 && (
-                <p className="text-sm text-slate-400">No medications added yet.</p>
-              )}
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={newMedName}
-                  onChange={e => setNewMedName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleAddMed()}
-                  placeholder="Medication name (e.g. Metformin)"
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy focus:outline-none bg-white"
-                />
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newMedDose}
-                    onChange={e => setNewMedDose(e.target.value)}
-                    placeholder="Dose (e.g. 500mg)"
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy focus:outline-none bg-white"
-                  />
-                  <input
-                    type="text"
-                    value={newMedFreq}
-                    onChange={e => setNewMedFreq(e.target.value)}
-                    placeholder="Frequency (e.g. twice daily)"
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy focus:outline-none bg-white"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddMed}
-                  disabled={!newMedName.trim() || addingMed}
-                  className="w-full py-2.5 rounded-xl text-white font-semibold text-sm transition-all disabled:opacity-40"
-                  style={{ background: "#4a7c59" }}
-                >
-                  {addingMed ? "Adding…" : "Add Medication"}
-                </button>
-              </div>
-            </>
+            <MedicationManager
+              patientId={patient.id}
+              medications={patient.medications}
+              onAdded={med => setPatient(p => p && { ...p, medications: [...p.medications, med] })}
+              onUpdated={med => setPatient(p => p && { ...p, medications: p.medications.map(m => m.id === med.id ? med : m) })}
+              onRemoved={id => setPatient(p => p && { ...p, medications: p.medications.map(m => m.id === id ? { ...m, active: false } : m) })}
+            />
           ) : (
             <p className="text-sm text-slate-400">Loading…</p>
           )}
@@ -538,20 +449,66 @@ export default function CustomizePage() {
 
           {/* Custom vitals */}
           <div className="pt-1 space-y-3">
-            <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Custom Vitals</p>
+            <div>
+              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide">Custom Vitals &amp; Lab Values</p>
+              <p className="text-sm text-slate-400 mt-0.5">Shown in the daily log&apos;s Vitals section. Fill them in only when measured.</p>
+            </div>
             {customVitals.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {customVitals.map(v => (
-                  <Chip key={v} label={v} onRemove={() => removeCustomVital(v)} color="blue" />
+                  <Chip key={v.name} label={vitalLabel(v.name, v.unit) + (v.type === "text" ? " · text" : "")}
+                    onRemove={() => removeCustomVital(v.name)} color="blue" />
                 ))}
               </div>
             )}
-            <AddInput
-              placeholder="e.g. Weight, Blood Sugar, Temperature…"
-              onAdd={addCustomVital}
-              borderColor="#93C5FD"
-              buttonColor="#1D4ED8"
-            />
+            <div className="space-y-2 rounded-xl p-3" style={{ border: "1px solid #93C5FD", background: "#F8FBFF" }}>
+              <input
+                type="text"
+                value={newVitalName}
+                onChange={e => setNewVitalName(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addCustomVital()}
+                placeholder="Name (e.g. Clozapine plasma, Weight)"
+                aria-label="Vital name"
+                className="w-full px-4 py-2.5 rounded-xl border text-base text-navy focus:outline-none bg-white"
+                style={{ borderColor: "#93C5FD" }}
+              />
+              <div className="flex gap-2">
+                {(["number", "text"] as const).map(t => (
+                  <button key={t} type="button" onClick={() => setNewVitalType(t)}
+                    aria-pressed={newVitalType === t}
+                    className="flex-1 py-2 rounded-xl border text-sm font-semibold transition-all"
+                    style={{
+                      borderColor: newVitalType === t ? "#1D4ED8" : "#CBD5E1",
+                      background: newVitalType === t ? "#1D4ED8" : "white",
+                      color: newVitalType === t ? "white" : "#64748B",
+                    }}>
+                    {t === "number" ? "Number" : "Text"}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={newVitalUnit}
+                onChange={e => setNewVitalUnit(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addCustomVital()}
+                placeholder="Unit, optional (e.g. ng/mL, lb)"
+                aria-label="Unit"
+                className="w-full px-4 py-2.5 rounded-xl border text-base text-navy focus:outline-none bg-white"
+                style={{ borderColor: "#93C5FD" }}
+              />
+              {newVitalTrimmed && newVitalDuplicate && (
+                <p className="text-xs" style={{ color: "#B91C1C" }}>{newVitalTrimmed} is already in the list.</p>
+              )}
+              <button
+                type="button"
+                onClick={addCustomVital}
+                disabled={!newVitalTrimmed || newVitalDuplicate}
+                className="w-full py-2.5 rounded-xl text-white font-semibold text-sm transition-all disabled:opacity-40"
+                style={{ background: "#1D4ED8" }}
+              >
+                Add vital
+              </button>
+            </div>
           </div>
         </Section>
 

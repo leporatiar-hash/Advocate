@@ -12,6 +12,8 @@ number — caregiver-entered values aren't on a clinical scale.
 from datetime import date, timedelta
 from typing import Optional
 
+from services.med_schedule import log_adherence_doses
+
 # Minimum change worth reporting, per metric, in that metric's own units.
 CUTOFFS = {
     "sleep": 1.0,          # hours per night
@@ -62,7 +64,8 @@ def _avg(values: list) -> Optional[float]:
 
 
 def _span_stats(logs: list) -> dict:
-    doses = [m for log in logs for m in (log.medications_taken or [])]
+    # Scheduled doses only: off-day and as-needed "not taken" entries aren't misses.
+    doses = [m for log in logs for m in log_adherence_doses(log)]
     left = [(log.socialization or {}).get("left_house") for log in logs]
     left = [v for v in left if v is not None]
     cigs = []
