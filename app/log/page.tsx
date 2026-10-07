@@ -434,9 +434,6 @@ function LogPageInner() {
   const [addDoseOpenFor, setAddDoseOpenFor] = useState<number | null>(null);
   const [addDoseTime, setAddDoseTime] = useState("");
 
-  // Quick dose mode
-  const [quickAllTaken, setQuickAllTaken] = useState<boolean | null>(null);
-  const [quickMissedText, setQuickMissedText] = useState("");
 
   // Photo capture
   const [photoLoading, setPhotoLoading] = useState(false);
@@ -720,29 +717,35 @@ function LogPageInner() {
     }
   }
 
-  // "Yes" marks only the meds due on this date. Either answer keeps any
-  // as-needed doses already marked — those are logged separately below.
-  function handleQuickTookAll(allTaken: boolean) {
-    setQuickAllTaken(allTaken);
-    const meds = patient?.medications.filter(m => m.active) ?? [];
-    const prnIds = new Set(meds.filter(m => isAsNeeded(m)).map(m => m.id));
-    const keptPrn = draft!.medicationsTaken.filter(e => prnIds.has(e.medication_id));
-    if (allTaken) {
-      const due = meds.filter(m => isDue(m, draft!.date));
-      update({ medicationsTaken: [...due.map(m => ({ medication_id: m.id, taken: true, time_taken: null })), ...keptPrn] });
-    } else {
-      update({ medicationsTaken: keptPrn });
-      setQuickMissedText("");
-    }
+  // Doses that would mark a due med as taken at its usual times (one
+  // untimed dose if it has none set).
+  function routineDoses(med: Medication): MedicationTaken[] {
+    const slots = parseDoseTimes(med.time_of_day).slots;
+    return slots.length
+      ? slots.map(slot => ({ medication_id: med.id, taken: true, time_taken: slot.time }))
+      : [{ medication_id: med.id, taken: true, time_taken: null }];
   }
 
-  function toggleAsNeededGiven(medId: number) {
-    const given = draft!.medicationsTaken.some(e => e.medication_id === medId && e.taken);
-    update({
-      medicationsTaken: given
-        ? draft!.medicationsTaken.filter(e => e.medication_id !== medId)
-        : [...draft!.medicationsTaken, { medication_id: medId, taken: true, time_taken: null }],
-    });
+  function isRoutineDone(med: Medication, entries: MedicationTaken[]): boolean {
+    const doses = entries.filter(e => e.medication_id === med.id && e.taken);
+    const slots = parseDoseTimes(med.time_of_day).slots;
+    return slots.length ? slots.every(slot => doses.some(d => d.time_taken === slot.time)) : doses.length > 0;
+  }
+
+  // The "All due meds taken" shortcut: fills in every due med's usual doses,
+  // or, when they're all already in, clears them again. As-needed and
+  // off-day doses are never touched.
+  function toggleAllDueTaken() {
+    const due = (patient?.medications ?? []).filter(m => m.active && isDue(m, draft!.date));
+    const entries = draft!.medicationsTaken;
+    if (due.every(m => isRoutineDone(m, entries))) {
+      const dueIds = new Set(due.map(m => m.id));
+      update({ medicationsTaken: entries.filter(e => !dueIds.has(e.medication_id)) });
+      return;
+    }
+    const added = due.flatMap(m => routineDoses(m).filter(r =>
+      !entries.some(e => e.medication_id === r.medication_id && e.taken && (r.time_taken === null || e.time_taken === r.time_taken))));
+    update({ medicationsTaken: [...entries, ...added] });
   }
 
   // ── Symptoms ─────────────────────────────────────────────────────────────
@@ -932,14 +935,7 @@ function LogPageInner() {
     if (!draft || !patient) return;
     setSaving(true);
     try {
-      const mode = user?.user_config?.dose_timing_mode ?? "quick";
-      let draftToSave = draft;
-      if (mode === "quick" && quickAllTaken === false && quickMissedText.trim()) {
-        const prefix = `Missed meds: ${quickMissedText.trim()}`;
-        const existingNotes = draft.notes.trim();
-        draftToSave = { ...draft, notes: existingNotes ? `${prefix}\n${existingNotes}` : prefix };
-      }
-      await performSave(draftToSave, patient);
+      await performSave(draft, patient);
       isDirtyRef.current = false;
       setSaved(true);
 
@@ -1170,8 +1166,7 @@ function LogPageInner() {
   const medRank = (m: Medication) => isDue(m, draft.date) ? 0 : isAsNeeded(m) ? 1 : 2;
   const activeMeds = patient.medications.filter(m => m.active).sort((a, b) => medRank(a) - medRank(b));
   const dueMeds = activeMeds.filter(m => isDue(m, draft.date));
-  const prnMeds = activeMeds.filter(m => isAsNeeded(m));
-  const offDayMeds = activeMeds.filter(m => !isDue(m, draft.date) && !isAsNeeded(m));
+  const allDueTaken = dueMeds.length > 0 && dueMeds.every(m => isRoutineDone(m, draft.medicationsTaken));
   const isTodayLog = draft.date === localDateStr();
   const offDayNote = (m: Medication) => {
     const next = nextDueDate(m, draft.date);
@@ -1209,7 +1204,6 @@ function LogPageInner() {
 
   const customSubstanceNames = configSubstanceFields.filter(s => s !== "cigarettes" && s !== "alcohol");
 
-  const doseTimingMode: "quick" | "simple" | "exact" = user?.user_config?.dose_timing_mode ?? "quick";
   const showSocialization: boolean = user?.user_config?.show_socialization !== false;
 
   const totalDoses = draft.medicationsTaken.filter(m => m.taken).length;
@@ -1412,100 +1406,19 @@ function LogPageInner() {
           bgColor="#f2f7f3" borderColor="#d4e0d7" headingColor="#2d4f38"
           isOpen={openSection === "medications"} onToggle={() => toggle("medications")}>
 
-          {doseTimingMode === "quick" ? (
-            <div className="space-y-4">
-              {activeMeds.length === 0 ? (
-                <p className="text-base text-slate-400">No active medications on file.</p>
-              ) : dueMeds.length === 0 ? (
-                <p className="text-base text-slate-500 rounded-2xl border-2 p-4" style={{ borderColor: "#d4e0d7", background: "#f8fcf9" }}>
-                  No scheduled medications are due {isTodayLog ? "today" : "on this day"}.
-                </p>
-              ) : (
-                <div className="rounded-2xl border-2 p-5 space-y-4" style={{ borderColor: "#d4e0d7", background: "#f8fcf9" }}>
-                  <div>
-                    <p className="text-lg font-bold text-navy">Took all meds {isTodayLog ? "today" : "this day"}?</p>
-                    <p className="text-sm text-slate-500 mt-0.5">{dueMeds.map(m => m.name).join(", ")}</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => handleQuickTookAll(true)}
-                      className="flex-1 py-3.5 rounded-xl text-base font-bold border-2 transition-all active:scale-95"
-                      style={{
-                        borderColor: quickAllTaken === true ? "#4a7c59" : "#CBD5E1",
-                        background: quickAllTaken === true ? "#4a7c59" : "white",
-                        color: quickAllTaken === true ? "white" : "#64748B",
-                      }}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickTookAll(false)}
-                      className="flex-1 py-3.5 rounded-xl text-base font-bold border-2 transition-all active:scale-95"
-                      style={{
-                        borderColor: quickAllTaken === false ? "#EF4444" : "#CBD5E1",
-                        background: quickAllTaken === false ? "#FEF2F2" : "white",
-                        color: quickAllTaken === false ? "#EF4444" : "#64748B",
-                      }}
-                    >
-                      No
-                    </button>
-                  </div>
-                  {quickAllTaken === false && (
-                    <div className="space-y-2 pt-1">
-                      <label className="text-sm font-semibold text-slate-600">Which ones did he miss?</label>
-                      <input
-                        type="text"
-                        value={quickMissedText}
-                        onChange={e => setQuickMissedText(e.target.value)}
-                        placeholder="e.g. Metformin, Atorvastatin…"
-                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy focus:outline-none bg-white"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+          {/* One tap for a routine day: marks every med due today at its usual times. */}
+          {dueMeds.length > 0 ? (
+            <button type="button" onClick={toggleAllDueTaken} aria-pressed={allDueTaken}
+              className="w-full py-3.5 rounded-xl text-base font-bold border-2 transition-all active:scale-[0.98]"
+              style={allDueTaken
+                ? { borderColor: "#4a7c59", background: "#4a7c59", color: "white" }
+                : { borderColor: "#4a7c59", background: "white", color: "#4a7c59" }}>
+              {allDueTaken ? `✓ All due meds taken` : `All due meds taken ${isTodayLog ? "today" : "this day"}`}
+            </button>
+          ) : activeMeds.length > 0 && (
+            <p className="text-sm text-slate-500">No scheduled medications are due {isTodayLog ? "today" : "on this day"}.</p>
+          )}
 
-              {offDayMeds.length > 0 && (
-                <div className="rounded-xl px-4 py-3 space-y-1" style={{ background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
-                  <p className="text-sm font-semibold text-slate-500">Not due {isTodayLog ? "today" : "this day"}</p>
-                  {offDayMeds.map(m => {
-                    const next = nextDueDate(m, draft.date);
-                    return (
-                      <p key={m.id} className="text-sm text-slate-500">
-                        {m.name} · {scheduleLabel(m).toLowerCase()}{next ? ` · next ${formatShortDate(next)}` : ""}
-                      </p>
-                    );
-                  })}
-                </div>
-              )}
-
-              {prnMeds.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-600">As needed · only log if given</p>
-                  <div className="flex flex-wrap gap-2">
-                    {prnMeds.map(m => {
-                      const given = draft.medicationsTaken.some(e => e.medication_id === m.id && e.taken);
-                      return (
-                        <button key={m.id} type="button" onClick={() => toggleAsNeededGiven(m.id)}
-                          aria-pressed={given}
-                          className="px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95"
-                          style={{
-                            borderColor: given ? "#4a7c59" : "#CBD5E1",
-                            background: given ? "#4a7c59" : "white",
-                            color: given ? "white" : "#475569",
-                          }}>
-                          {given ? `✓ ${m.name} given` : `${m.name} given ${isTodayLog ? "today" : "this day"}`}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
           {activeMeds.length === 0 && (
             <p className="text-base text-slate-400">No active medications on file.</p>
           )}
@@ -1586,8 +1499,8 @@ function LogPageInner() {
                   </div>
                 )}
 
-                {/* Inline add-dose panel */}
-                {doseOpen && doseTimingMode === "simple" && (
+                {/* Inline add-dose panel: a usual time, or "Other time" for a clock time */}
+                {doseOpen && (
                   <div className="bg-white rounded-xl px-3 py-3 border border-amber-200 space-y-2">
                     <div className="grid grid-cols-4 gap-2">
                       {SIMPLE_DOSE_TIMES.map(({ label, time }) => (
@@ -1595,31 +1508,28 @@ function LogPageInner() {
                           key={label}
                           type="button"
                           onClick={() => confirmDoseSimple(med.id, time)}
-                          className="py-2 rounded-lg text-sm font-semibold border-2 transition-all active:scale-95"
+                          className="py-2 px-0.5 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all active:scale-95"
                           style={{ borderColor: "#4a7c59", color: "#4a7c59", background: "white" }}
                         >
                           {label}
                         </button>
                       ))}
                     </div>
+                    <div className="flex gap-2 items-center">
+                      <label className="text-sm text-slate-500 flex-shrink-0" htmlFor={`dose-time-${med.id}`}>Other time</label>
+                      <input
+                        id={`dose-time-${med.id}`}
+                        type="time"
+                        value={addDoseTime}
+                        onChange={e => setAddDoseTime(e.target.value)}
+                        className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-slate-200 text-navy text-base focus:outline-none bg-white"
+                      />
+                      <button type="button" onClick={() => confirmDose(med.id)}
+                        className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white flex-shrink-0"
+                        style={{ background: "#4a7c59" }}>Log</button>
+                    </div>
                     <button type="button" onClick={() => setAddDoseOpenFor(null)}
                       className="text-xs text-slate-400 w-full text-center">Cancel</button>
-                  </div>
-                )}
-
-                {doseOpen && doseTimingMode === "exact" && (
-                  <div className="flex gap-2 items-center bg-white rounded-xl px-3 py-2.5 border border-amber-200">
-                    <input
-                      type="time"
-                      value={addDoseTime}
-                      onChange={e => setAddDoseTime(e.target.value)}
-                      className="flex-1 text-navy text-base focus:outline-none bg-transparent"
-                    />
-                    <button type="button" onClick={() => confirmDose(med.id)}
-                      className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white"
-                      style={{ background: "#4a7c59" }}>Log</button>
-                    <button type="button" onClick={() => setAddDoseOpenFor(null)}
-                      className="text-slate-400 text-lg leading-none">×</button>
                   </div>
                 )}
 
@@ -1720,9 +1630,6 @@ function LogPageInner() {
               </div>
             );
           })}
-
-            </>
-          )}
 
           {/* ── Manage medications ── */}
           <div className="pt-2 border-t border-amber-100">

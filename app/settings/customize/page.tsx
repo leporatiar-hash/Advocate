@@ -135,8 +135,6 @@ export default function CustomizePage() {
   const [showAlcohol, setShowAlcohol] = useState(true);
   const [customSubstances, setCustomSubstances] = useState<string[]>([]);
 
-  // Dose timing
-  const [doseTimingMode, setDoseTimingMode] = useState<"quick" | "simple" | "exact">("quick");
 
   // Symptom scale — display only, the logged value is still 0-10 either way
   const [symptomScale, setSymptomScale] = useState<"numeric" | "words">("numeric");
@@ -162,7 +160,6 @@ export default function CustomizePage() {
     setShowCigarettes(sf.includes("cigarettes"));
     setShowAlcohol(sf.includes("alcohol"));
     setCustomSubstances(sf.filter((s: string) => s !== "cigarettes" && s !== "alcohol"));
-    setDoseTimingMode(cfg.dose_timing_mode ?? "quick");
     setSymptomScale(cfg.symptom_scale ?? "numeric");
     setShowSocialization(cfg.show_socialization !== false);
   }, []);
@@ -292,7 +289,6 @@ export default function CustomizePage() {
           ...(showAlcohol ? ["alcohol"] : []),
           ...customSubstances,
         ],
-        dose_timing_mode: doseTimingMode,
         symptom_scale: symptomScale,
         show_socialization: showSocialization,
       };
@@ -347,43 +343,6 @@ export default function CustomizePage() {
           ) : (
             <p className="text-sm text-slate-400">Loading…</p>
           )}
-        </Section>
-
-        {/* ── Dose Timing ── */}
-        <Section title="Daily Log Style" subtitle="How the daily log asks about doses. Applies to every medication; each one's schedule and times are set above.">
-          <div className="space-y-3">
-            {(["quick", "simple", "exact"] as const).map(mode => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setDoseTimingMode(mode)}
-                className="w-full flex items-center gap-4 p-4 rounded-xl border-2 text-left transition-all"
-                style={{
-                  borderColor: doseTimingMode === mode ? "#4a7c59" : "#CBD5E1",
-                  background: doseTimingMode === mode ? "#f2f7f3" : "white",
-                }}
-              >
-                <div
-                  className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0"
-                  style={{ borderColor: doseTimingMode === mode ? "#4a7c59" : "#CBD5E1" }}
-                >
-                  {doseTimingMode === mode && <div className="w-2.5 h-2.5 rounded-full" style={{ background: "#4a7c59" }} />}
-                </div>
-                <div>
-                  <p className="text-base font-semibold text-navy">
-                    {mode === "quick" ? "Quick" : mode === "simple" ? "Simple" : "Exact Time"}
-                  </p>
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    {mode === "quick"
-                      ? "One question: “Took all meds today?” Yes or No"
-                      : mode === "simple"
-                      ? "Tap each medication's times (Morning, Night…)"
-                      : "Pick the precise clock time for each dose"}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
         </Section>
 
         {/* ── Symptom Scale ── */}

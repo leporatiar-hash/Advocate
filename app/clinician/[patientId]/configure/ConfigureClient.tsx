@@ -208,7 +208,6 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
   const [showCigarettes, setShowCigarettes] = useState(true);
   const [showAlcohol, setShowAlcohol] = useState(true);
   const [customSubstances, setCustomSubstances] = useState<string[]>([]);
-  const [doseTimingMode, setDoseTimingMode] = useState<"quick" | "simple" | "exact">("quick");
   const [symptomScale, setSymptomScale] = useState<"numeric" | "words">("numeric");
   const [showSocialization, setShowSocialization] = useState(true);
 
@@ -234,7 +233,6 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
         setShowCigarettes(sf.includes("cigarettes"));
         setShowAlcohol(sf.includes("alcohol"));
         setCustomSubstances(sf.filter((s) => s !== "cigarettes" && s !== "alcohol"));
-        setDoseTimingMode(cfg.dose_timing_mode ?? "quick");
         setSymptomScale(cfg.symptom_scale ?? "numeric");
         setShowSocialization(cfg.show_socialization !== false);
       })
@@ -319,7 +317,6 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
           ...(showAlcohol ? ["alcohol"] : []),
           ...customSubstances,
         ],
-        dose_timing_mode: doseTimingMode,
         symptom_scale: symptomScale,
         show_socialization: showSocialization,
       });
@@ -416,19 +413,6 @@ export default function ConfigureClient({ patientId }: { patientId: number }) {
               {addingMed ? "Adding…" : "Add medication"}
             </button>
           </div>
-        </Section>
-
-        <Section title="Dose timing" subtitle="How the family records when medications were taken">
-          <RadioList
-            label="Dose timing"
-            value={doseTimingMode}
-            onChange={edit(setDoseTimingMode)}
-            options={[
-              { id: "quick", label: "Quick", sub: "“Took all meds today” · Yes or No" },
-              { id: "simple", label: "Simple", sub: "Morning · Afternoon · Evening · Night" },
-              { id: "exact", label: "Exact time", sub: "The precise time of each dose" },
-            ]}
-          />
         </Section>
 
         <Section title="Symptom scale" subtitle="How severity is shown when logging. The saved value is 0–10 either way.">
