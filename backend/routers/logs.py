@@ -17,7 +17,7 @@ _LOG_RESPONSE_FIELDS = [
     "id", "patient_id", "logged_by", "date", "medications_taken", "symptoms",
     "medication_side_effects", "sleep_hours", "mood_score", "water_intake_oz",
     "activities", "lifestyle", "notes", "episode", "vitals", "socialization",
-    "log_type", "created_at",
+    "log_type", "late_kind", "late_saved_at", "created_at",
 ]
 
 
@@ -28,6 +28,20 @@ def _serialize_log_field(value):
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return value
+
+
+def _mark_late(log: models.DailyLog, was_existing: bool, client_today: Optional[date_type]) -> None:
+    """Flag a save that lands on a later calendar day than the entry's own
+    date. A day first logged after the fact stays "added" through later
+    edits; an on-time entry changed afterwards becomes "edited"."""
+    today = client_today or datetime.now().date()
+    if log.date >= today:
+        return
+    if not was_existing:
+        log.late_kind = "added"
+    elif log.late_kind != "added":
+        log.late_kind = "edited"
+    log.late_saved_at = datetime.utcnow()
 
 
 def _client_today(date_str: Optional[str]) -> date_type:
@@ -102,6 +116,7 @@ def create_or_update_log(
     if existing:
         for key, val in fields.items():
             setattr(existing, key, val)
+        _mark_late(existing, True, log_data.client_today)
         db.commit()
         db.refresh(existing)
         log = existing
@@ -112,6 +127,7 @@ def create_or_update_log(
             date=log_data.date,
             **fields,
         )
+        _mark_late(log, False, log_data.client_today)
         db.add(log)
         db.commit()
         db.refresh(log)
@@ -319,6 +335,7 @@ def quick_log(
     if existing:
         for key, val in fields.items():
             setattr(existing, key, val)
+        _mark_late(existing, True, body.client_today)
         db.commit()
         db.refresh(existing)
         return existing
@@ -329,6 +346,7 @@ def quick_log(
         date=body.date,
         **fields,
     )
+    _mark_late(log, False, body.client_today)
     db.add(log)
     db.commit()
     db.refresh(log)

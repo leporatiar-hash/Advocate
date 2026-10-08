@@ -25,6 +25,13 @@ export function LogDrillDown({ log }: { log: DailyLog }) {
 
   return (
     <div className="space-y-3">
+      {log.late_kind && (
+        <p className="text-sm rounded-xl border px-4 py-2.5" style={{ background: "#fff", borderColor: "var(--cp-border)", color: "var(--cp-text-muted)" }}>
+          {log.late_kind === "added" ? "Added later" : "Edited later"} by the caregiver
+          {log.late_saved_at && ` on ${new Date(log.late_saved_at + "Z").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+          {" "}— recalled after the day, not recorded on it.
+        </p>
+      )}
       {hasVitals && (
         <Section title="Vitals">
           <div className="flex gap-5 flex-wrap text-sm">

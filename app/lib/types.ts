@@ -189,6 +189,10 @@ export interface DailyLog {
   photo: string | null;
   socialization: Socialization | null;
   log_type: "detailed" | "same_as_yesterday" | "nothing_notable" | "catch_up_note" | null;
+  // Set when saved on a later day than `date`: first logged after the fact
+  // ("added") or an on-time entry changed later ("edited").
+  late_kind?: "added" | "edited" | null;
+  late_saved_at?: string | null;
   created_at: string;
 }
 

@@ -148,8 +148,9 @@ export const api = {
     request(`/patients/${patientId}/treatment-plan`, { method: "POST", body: JSON.stringify(data) }),
 
   // Logs
+  // client_today lets the server mark saves for an earlier day as "added/edited later".
   createLog: (data: object) =>
-    request("/logs/", { method: "POST", body: JSON.stringify(data) }),
+    request("/logs/", { method: "POST", body: JSON.stringify({ ...data, client_today: localDateStr() }) }),
   getLogs: (patientId: number, opts?: { days?: number; includePhoto?: boolean }) => {
     const params = new URLSearchParams();
     if (opts?.days) params.set("days", String(opts.days));
@@ -161,7 +162,7 @@ export const api = {
   getLogByDate: (patientId: number, date: string) => request(`/logs/${patientId}/date/${date}`),
   getMissedDays: (patientId: number) => request(`/logs/${patientId}/missed-days?date=${localDateStr()}`),
   quickLog: (patientId: number, date: string, type: string, note?: string) =>
-    request(`/logs/${patientId}/quick`, { method: "POST", body: JSON.stringify({ date, type, note }) }),
+    request(`/logs/${patientId}/quick`, { method: "POST", body: JSON.stringify({ date, type, note, client_today: localDateStr() }) }),
   correctMedicationTaken: (patientId: number, date: string, medicationId: number) =>
     request(`/logs/${patientId}/date/${date}/medication-taken`, {
       method: "PATCH",

@@ -115,6 +115,13 @@ class DailyLog(Base):
     # "detailed" | "same_as_yesterday" | "nothing_notable"
     log_type = Column(String, nullable=True, default="detailed")
 
+    # Set when the entry is saved on a later calendar day than `date` (the
+    # caregiver's own local day, sent by the client). "added" = the day was
+    # first logged after the fact; "edited" = an on-time entry was changed
+    # later. Recalled-later data stays distinguishable for clinicians.
+    late_kind = Column(String, nullable=True)
+    late_saved_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     patient = relationship("Patient", back_populates="daily_logs")

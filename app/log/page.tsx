@@ -398,7 +398,9 @@ function LogPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const isHistorical = !!dateParam && dateParam !== localDateStr();
+  // Past days only — a future or malformed date falls back to today.
+  const isHistorical = !!dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) && dateParam < localDateStr();
+  const fromHistory = searchParams.get("from") === "history";
   const targetDate = isHistorical ? dateParam! : localDateStr();
 
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -450,6 +452,8 @@ function LogPageInner() {
 
   // Auto-save
   const isDirtyRef = useRef(false);
+  // Med ids a saved past entry already had (null = new entry or today).
+  const originalMedIdsRef = useRef<Set<number> | null>(null);
   const [lastAutoSaved, setLastAutoSaved] = useState<Date | null>(null);
   const draftRef = useRef<LogDraft | null>(null);
   const patientRef = useRef<Patient | null>(null);
@@ -534,6 +538,12 @@ function LogPageInner() {
 
       if (existingLog) {
         setLoadedFromServer(true);
+        // Editing a past entry: remember which meds it already covered, so a
+        // med started after that day isn't written in as a missed dose.
+        if (isHistorical) {
+          const saved = (existingLog.medications_taken as MedicationTaken[] | null) ?? [];
+          originalMedIdsRef.current = new Set(saved.map(e => e.medication_id));
+        }
         setDraft(restoreDraftFromLog(existingLog, p, targetDate));
       } else {
         setDraft(defaultDraft(p.id, p.medications, targetDate));
@@ -906,8 +916,10 @@ function LogPageInner() {
     const medsWithDoses = new Set(d.medicationsTaken.map(e => e.medication_id));
     // Include untaken entries for meds with no doses (for adherence tracking) —
     // only meds actually due that day. Off-day and as-needed meds aren't misses.
+    const coveredBefore = originalMedIdsRef.current;
     const notTakenEntries: MedicationTaken[] = activeMeds
       .filter(m => !medsWithDoses.has(m.id) && isDue(m, d.date))
+      .filter(m => !coveredBefore || coveredBefore.has(m.id))
       .map(m => ({ medication_id: m.id, taken: false, time_taken: null }));
     const hydrationOz = d.hydration === "Good" ? 80 : d.hydration === "Fair" ? 48 : d.hydration === "Poor" ? 24 : null;
     await api.createLog({
@@ -946,7 +958,9 @@ function LogPageInner() {
         const queuedStr = sessionStorage.getItem("truefit_queued_days");
         const queued = queuedStr ? (JSON.parse(queuedStr) as string[]) : [];
         const remaining = queued.filter(d => d !== targetDate);
-        if (remaining.length > 0) {
+        if (fromHistory && !queued.includes(targetDate)) {
+          setTimeout(() => { router.push(`/history?open=${targetDate}`); }, 800);
+        } else if (remaining.length > 0) {
           sessionStorage.setItem("truefit_queued_days", JSON.stringify(remaining));
           setTimeout(() => { router.push(`/log?date=${remaining[0]}`); }, 800);
         } else {
@@ -1265,6 +1279,11 @@ function LogPageInner() {
             <p className="text-base warm-soft mt-1">
               {targetDateObj.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
             </p>
+            {!loadedFromServer && (
+              <p className="text-sm mt-2 px-3 py-2 rounded-xl" style={{ background: "#f4efe6", color: "#5b4a2e" }}>
+                Nothing was logged this day. Fill in what you remember — it&apos;s shown as added later.
+              </p>
+            )}
           </div>
         ) : (
           <div>

@@ -168,6 +168,8 @@ class LogType(str, Enum):
 
 class QuickLogRequest(BaseModel):
     date: date
+    # The caregiver's local "today" — marks saves for an earlier day as late.
+    client_today: Optional[date] = None
     type: str  # "same_as_yesterday" | "nothing_notable" | "catch_up_note"
     note: Optional[str] = None  # used when type == "catch_up_note"
 
@@ -236,6 +238,7 @@ class DailyLogCreate(BaseModel):
     photo: Optional[str] = None
     socialization: Optional[Socialization] = None
     log_type: str = "detailed"
+    client_today: Optional[date] = None
 
 
 class DailyLogResponse(BaseModel):
@@ -257,6 +260,8 @@ class DailyLogResponse(BaseModel):
     photo: Optional[str] = None
     socialization: Optional[Any] = None
     log_type: Optional[str] = "detailed"
+    late_kind: Optional[str] = None
+    late_saved_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

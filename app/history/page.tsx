@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "../lib/api";
+import Link from "next/link";
+import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { adherenceEntries, removeFalseMisses } from "../lib/medSchedule";
@@ -28,6 +29,87 @@ function fmtDate(dateStr: string) {
   if (d.getTime() === today.getTime()) return "Today";
   if (d.getTime() === yesterday.getTime()) return "Yesterday";
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return localDateStr(d);
+}
+
+// Today's log lives at /log; any past day opens the same editor for that date.
+function logHref(date: string): string {
+  return date === localDateStr() ? "/log" : `/log?date=${date}&from=history`;
+}
+
+type TimelineItem =
+  | { kind: "log"; date: string; log: DailyLog }
+  | { kind: "missing"; date: string }
+  | { kind: "missingRun"; date: string; dates: string[] }; // dates newest-first
+
+// Runs this long or longer collapse into one row so a long break doesn't
+// bury the logged days.
+const COLLAPSE_RUN = 4;
+
+/** Logged days plus the unlogged days between the first log and today,
+ * newest first. */
+function buildTimeline(logs: DailyLog[]): TimelineItem[] {
+  if (!logs.length) return [];
+  const byDate = new Map(logs.map(l => [l.date, l]));
+  const first = logs[logs.length - 1].date;
+  const items: TimelineItem[] = [];
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length >= COLLAPSE_RUN) items.push({ kind: "missingRun", date: run[0], dates: run });
+    else run.forEach(d => items.push({ kind: "missing", date: d }));
+    run = [];
+  };
+  for (let d = localDateStr(); d >= first; d = shiftDate(d, -1)) {
+    const log = byDate.get(d);
+    if (log) { flush(); items.push({ kind: "log", date: d, log }); }
+    else run.push(d);
+  }
+  flush();
+  return items;
+}
+
+function LateTag({ log }: { log: DailyLog }) {
+  if (!log.late_kind) return null;
+  return (
+    <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f1f5f9", color: "#64748B" }}
+      title={log.late_saved_at ? `Last saved ${new Date(log.late_saved_at + "Z").toLocaleDateString()}` : undefined}>
+      {log.late_kind === "added" ? "Added later" : "Edited later"}
+    </span>
+  );
+}
+
+function MissingRow({ date }: { date: string }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl border border-dashed" style={{ borderColor: "#d4e0d7" }}>
+      <p className="w-14 flex-shrink-0 text-center text-sm font-semibold text-slate-400">{fmtDate(date)}</p>
+      <p className="flex-1 text-sm text-slate-400">Not logged</p>
+      <Link href={logHref(date)} className="text-sm font-semibold px-3 py-1.5 rounded-xl" style={{ color: "#4a7c59", background: "#e8f0eb" }}>
+        + Add log
+      </Link>
+    </div>
+  );
+}
+
+function MissingRunRow({ dates }: { dates: string[] }) {
+  const [open, setOpen] = useState(false);
+  const oldest = dates[dates.length - 1];
+  return (
+    <div className="space-y-2">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-2xl border border-dashed text-left" style={{ borderColor: "#d4e0d7" }}>
+        <p className="flex-1 text-sm text-slate-400">
+          {dates.length} days not logged · {fmtDate(oldest)} – {fmtDate(dates[0])}
+        </p>
+        <span className="text-sm font-semibold" style={{ color: "#4a7c59" }}>{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && dates.map(d => <MissingRow key={d} date={d} />)}
+    </div>
+  );
 }
 
 function fmtMonthGroup(dateStr: string) {
@@ -190,14 +272,20 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
           <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{log.notes}</p>
         </div>
       )}
+
+      <Link href={logHref(log.date)}
+        className="block w-full py-2.5 rounded-xl text-center text-sm font-semibold text-white"
+        style={{ background: "#4a7c59" }}>
+        Edit this day
+      </Link>
     </div>
   );
 }
 
 // ── Day row ────────────────────────────────────────────────────────────────────
 
-function DayRow({ log, medications }: { log: DailyLog; medications: Medication[] }) {
-  const [open, setOpen] = useState(false);
+function DayRow({ log, medications, initiallyOpen }: { log: DailyLog; medications: Medication[]; initiallyOpen?: boolean }) {
+  const [open, setOpen] = useState(!!initiallyOpen);
 
   const meds = medsStatus(log, medications);
   const symptomCount = (log.symptoms ?? []).length;
@@ -208,9 +296,7 @@ function DayRow({ log, medications }: { log: DailyLog; medications: Medication[]
   const isToday = dateLabel === "Today";
 
   return (
-    <div
-      className="warm-card overflow-hidden"
-    >
+    <div id={`day-${log.date}`} className="warm-card overflow-hidden scroll-mt-20">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -251,6 +337,7 @@ function DayRow({ log, medications }: { log: DailyLog; medications: Medication[]
           {hasEpisode && (
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #d4e0d7" }}>Episode</span>
           )}
+          <LateTag log={log} />
         </div>
 
         {/* Chevron */}
@@ -281,6 +368,15 @@ export default function HistoryPage() {
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Coming back from editing a day (/history?open=YYYY-MM-DD): show it expanded.
+  const [openDate, setOpenDate] = useState<string | null>(null);
+  useEffect(() => {
+    setOpenDate(new URLSearchParams(window.location.search).get("open"));
+  }, []);
+  useEffect(() => {
+    if (!openDate || !logs.length) return;
+    document.getElementById(`day-${openDate}`)?.scrollIntoView({ block: "start" });
+  }, [openDate, logs]);
 
   const loadData = useCallback(async () => {
     try {
@@ -316,15 +412,20 @@ export default function HistoryPage() {
       )
     : logs;
 
+  // Unlogged days only appear in the full timeline, not in search results.
+  const timeline: TimelineItem[] = search.trim()
+    ? filtered.map(log => ({ kind: "log" as const, date: log.date, log }))
+    : buildTimeline(logs);
+
   // Group by month
-  const groups: { month: string; logs: DailyLog[] }[] = [];
-  for (const log of filtered) {
-    const month = fmtMonthGroup(log.date);
+  const groups: { month: string; items: TimelineItem[] }[] = [];
+  for (const item of timeline) {
+    const month = fmtMonthGroup(item.date);
     const last = groups[groups.length - 1];
     if (last?.month === month) {
-      last.logs.push(log);
+      last.items.push(item);
     } else {
-      groups.push({ month, logs: [log] });
+      groups.push({ month, items: [item] });
     }
   }
 
@@ -380,9 +481,16 @@ export default function HistoryPage() {
         {groups.map(group => (
           <div key={group.month} className="space-y-2">
             <h2 className="warm-h2 text-base px-1">{group.month}</h2>
-            {group.logs.map(log => (
-              <DayRow key={log.id} log={log} medications={patient?.medications ?? []} />
-            ))}
+            {group.items.map(item =>
+              item.kind === "log" ? (
+                <DayRow key={item.log.id} log={item.log} medications={patient?.medications ?? []}
+                  initiallyOpen={item.date === openDate} />
+              ) : item.kind === "missing" ? (
+                <MissingRow key={item.date} date={item.date} />
+              ) : (
+                <MissingRunRow key={item.date} dates={item.dates} />
+              )
+            )}
           </div>
         ))}
 
