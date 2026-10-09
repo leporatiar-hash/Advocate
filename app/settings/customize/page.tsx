@@ -147,6 +147,7 @@ export default function CustomizePage() {
   const [addingContact, setAddingContact] = useState(false);
 
   // Progress / improvement areas
+  const [trackProgress, setTrackProgress] = useState(false);
   const [progressAreas, setProgressAreas] = useState<ProgressArea[]>([]);
   const [newAreaName, setNewAreaName] = useState("");
   const [newAreaScale, setNewAreaScale] = useState<ProgressScale>("numeric");
@@ -154,6 +155,7 @@ export default function CustomizePage() {
 
   const loadFromUser = useCallback((u: User) => {
     const cfg = u.user_config;
+    setTrackProgress(cfg?.track_progress === true);
     setProgressAreas(normalizeProgressAreas(cfg?.progress_areas));
 
     setSymptoms(cfg?.symptoms?.length ? cfg.symptoms : [...DEFAULT_SYMPTOM_NAMES]);
@@ -308,6 +310,7 @@ export default function CustomizePage() {
         tracking_modules: Array.from(trackingModules),
         custom_vitals: customVitals,
         progress_areas: progressAreas,
+        track_progress: trackProgress,
         substance_fields: [
           ...(showCigarettes ? ["cigarettes"] : []),
           ...(showAlcohol ? ["alcohol"] : []),
@@ -416,8 +419,12 @@ export default function CustomizePage() {
         </Section>
 
         {/* ── Progress & improvements ── */}
-        <Section title="Progress & Improvements"
-          subtitle="Things you hope to see get better — motivation, enjoying activities, insight, a side effect easing. Higher is better here.">
+        <Section title="Progress & Improvements" subtitle="Optional. Rate things you hope to see get better.">
+          <div className="flex items-center justify-between">
+            <p className="text-base font-semibold text-slate-700">Track progress in the daily log</p>
+            <Toggle value={trackProgress} onChange={setTrackProgress} />
+          </div>
+          {trackProgress && (<>
           {progressAreas.length > 0 ? (
             <div className="space-y-2">
               {progressAreas.map(a => {
@@ -482,6 +489,7 @@ export default function CustomizePage() {
             </button>
             <p className="text-xs text-slate-400">Remember to tap Save at the bottom of the page.</p>
           </div>
+          </>)}
         </Section>
 
         {/* ── Tracking ── */}

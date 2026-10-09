@@ -61,6 +61,7 @@ export interface DashboardConfig {
   tracking_modules?: string[]; // "sleep" | "hydration" | "vitals" | custom names
   custom_vitals?: Array<CustomVital | string>; // legacy entries are bare names
   progress_areas?: ProgressArea[];
+  track_progress?: boolean; // opt-in; off unless the caregiver turns it on
   show_socialization?: boolean;
   // Display only — the underlying value logged is still 0-10 either way (no
   // schema change, same DailyLog.symptoms shape). "words" shows a four-tile

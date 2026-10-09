@@ -224,7 +224,16 @@ def generate_summary(
     if wins:
         progress_lines.append("  Wins / milestones noted by the caregiver:")
         progress_lines += [f"    - {w['date']}: {w['text']}" for w in wins]
-    progress_text = "\n".join(progress_lines) or "  No progress areas rated in this period."
+    # Opt-in feature: only caregivers who track progress get this section.
+    progress_section = (
+        "PROGRESS & IMPROVEMENTS (caregiver-defined areas where HIGHER / \"better\" IS GOOD — the opposite "
+        "of symptoms; report gains plainly and do not reframe them as problems):\n"
+        + "\n".join(progress_lines) + "\n\n"
+    ) if progress_lines else ""
+    progress_hint = (
+        "- Describe progress and improvements (including any linked medication and the caregiver's wins) "
+        "as their own findings, using only the trends stated above\n"
+    ) if progress_lines else ""
 
     # Only state a statistic that actually has a value. A metric with no logged
     # data must be omitted, never rendered as "None" — handing the model a
@@ -335,10 +344,7 @@ AS-NEEDED MEDICATION USE (taken only when needed — these are NEVER missed dose
 CUSTOM VITALS / LAB VALUES (entered by the caregiver when measured — sparse readings are expected and are not gaps in care):
 {custom_vitals_text}
 
-PROGRESS & IMPROVEMENTS (caregiver-defined areas where HIGHER / "better" IS GOOD — the opposite of symptoms; report gains plainly and do not reframe them as problems):
-{progress_text}
-
-AGGREGATED STATISTICS:
+{progress_section}AGGREGATED STATISTICS:
 {aggregated_stats_text}
 
 SYMPTOM TRACKING (Severity on a 1–10 scale — out of {total_logs} logged days):
@@ -361,8 +367,7 @@ KEY PATTERNS TO ANALYZE:
 - Note missed-dose patterns
 - Note how often as-needed medications were used and whether use clusters around symptom changes
 - Note trends in custom vitals / lab values over time, using only the readings listed above
-- Describe progress and improvements (including any linked medication and the caregiver's wins) as their own findings, using only the trends stated above
-- Highlight week-over-week changes if visible in the raw data
+{progress_hint}- Highlight week-over-week changes if visible in the raw data
 
 RAW LOG DATA (chronological):
 {json.dumps(log_entries, indent=2)}

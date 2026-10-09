@@ -1771,7 +1771,8 @@ function LogPageInner() {
           })}
         </AccordionSection>
 
-        {/* ── Progress ── */}
+        {/* ── Progress (opt-in in Settings) ── */}
+        {user?.user_config?.track_progress === true && (
         <AccordionSection id="progress" title="Progress" summaryLine={progressText}
           bgColor="white" borderColor="#d4e0d7" headingColor="#1a2420"
           isOpen={openSection === "progress"} onToggle={() => toggle("progress")}>
@@ -1844,6 +1845,7 @@ function LogPageInner() {
             </div>
           </div>
         </AccordionSection>
+        )}
 
         {/* ── Episode ── */}
         <AccordionSection id="episode" title="Episode" summaryLine={episodeText}
