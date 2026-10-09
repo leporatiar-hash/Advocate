@@ -115,6 +115,12 @@ class DailyLog(Base):
     # "detailed" | "same_as_yesterday" | "nothing_notable"
     log_type = Column(String, nullable=True, default="detailed")
 
+    # Caregiver-defined improvement areas (Settings → Progress), higher/"better"
+    # is good — the opposite direction of symptoms:
+    # {ratings: {name: {scale: "numeric", value: 0-10} | {scale: "compare",
+    #  value: "worse"|"same"|"better"}}, wins: str|null}
+    progress = Column(JSON, nullable=True)
+
     # Set when the entry is saved on a later calendar day than `date` (the
     # caregiver's own local day, sent by the client). "added" = the day was
     # first logged after the fact; "edited" = an on-time entry was changed

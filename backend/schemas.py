@@ -237,6 +237,7 @@ class DailyLogCreate(BaseModel):
     vitals: Optional[Any] = None
     photo: Optional[str] = None
     socialization: Optional[Socialization] = None
+    progress: Optional[Any] = None
     log_type: str = "detailed"
     client_today: Optional[date] = None
 
@@ -260,6 +261,7 @@ class DailyLogResponse(BaseModel):
     photo: Optional[str] = None
     socialization: Optional[Any] = None
     log_type: Optional[str] = "detailed"
+    progress: Optional[Any] = None
     late_kind: Optional[str] = None
     late_saved_at: Optional[datetime] = None
     created_at: datetime
@@ -680,6 +682,9 @@ class ClinicianPortalResponse(BaseModel):
     adherence_series: AdherenceSeriesBlock
     med_adherence: List[MedAdherenceEntry]
     recent_notes: List[RecentNote]
+    # services/progress.build_progress_stats — caregiver-defined improvement
+    # areas (higher is better) and wins.
+    progress_stats: Dict[str, Any] = {}
 
 
 # ── Saved Summaries ───────────────────────────────────────────────────────────

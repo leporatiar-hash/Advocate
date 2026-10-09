@@ -43,7 +43,8 @@ function shortDate(date: string): string {
 }
 
 function yTicks(unit: string, [lo, hi]: [number, number]): number[] {
-  if (unit === "/10") return [0, 2, 4, 6, 8, 10];
+  if (unit === "/10" || unit === "score") return [0, 2, 4, 6, 8, 10];
+  if (unit === "vs usual") return [-1, 0, 1];
   if (unit === "%") return [0, 25, 50, 75, 100];
   if (unit === "hrs") return Array.from({ length: hi / 4 + 1 }, (_, i) => i * 4);
   if (unit === "days") return [0, 1];
@@ -54,6 +55,7 @@ function tickLabel(v: number, unit: string): string {
   if (unit === "%") return `${v}%`;
   if (unit === "hrs") return `${v}h`;
   if (unit === "days") return v ? "Yes" : "No";
+  if (unit === "vs usual") return v > 0 ? "Better" : v < 0 ? "Worse" : "Same";
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
@@ -267,7 +269,7 @@ export default function MetricDetailClient({ metricKey, onBack }: { metricKey: s
   }, [user, isLoading, loadData, router]);
 
   const medications = patient?.medications ?? [];
-  const config = useMemo(() => getMetricConfig(metricKey, medications), [metricKey, medications]);
+  const config = useMemo(() => getMetricConfig(metricKey, medications, user?.user_config?.progress_areas ?? []), [metricKey, medications, user]);
 
   const allPoints = useMemo(() => {
     if (!config) return [];
@@ -374,7 +376,7 @@ export default function MetricDetailClient({ metricKey, onBack }: { metricKey: s
     );
   }
 
-  const kind = config.unit === "/10" ? "Symptom" : config.unit === "%" ? "Medication" : metricKey === "sleep" ? "Sleep" : "Daily routine";
+  const kind = config.unit === "/10" ? "Symptom" : config.unit === "score" || config.unit === "vs usual" ? "Progress" : config.unit === "%" ? "Medication" : metricKey === "sleep" ? "Sleep" : "Daily routine";
   const backButton = (
     <>
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

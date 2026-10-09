@@ -17,7 +17,7 @@ _LOG_RESPONSE_FIELDS = [
     "id", "patient_id", "logged_by", "date", "medications_taken", "symptoms",
     "medication_side_effects", "sleep_hours", "mood_score", "water_intake_oz",
     "activities", "lifestyle", "notes", "episode", "vitals", "socialization",
-    "log_type", "late_kind", "late_saved_at", "created_at",
+    "log_type", "progress", "late_kind", "late_saved_at", "created_at",
 ]
 
 
@@ -101,6 +101,7 @@ def create_or_update_log(
         "vitals": log_data.vitals,
         "photo": log_data.photo,
         "socialization": _serialize_log_field(log_data.socialization),
+        "progress": log_data.progress,
         "log_type": log_data.log_type or "detailed",
     }
 
@@ -316,6 +317,7 @@ def quick_log(
                 "vitals": previous.vitals,
                 "photo": None,  # photos are not carried forward
                 "socialization": previous.socialization,
+                "progress": previous.progress,
                 "log_type": "same_as_yesterday",
             }
         else:

@@ -242,8 +242,13 @@ export default function InsightsPage() {
   }, [user, patient]);
 
   const metricRows = useMemo(
-    () => buildMetricRows(logs, allMedications, configuredSymptoms),
-    [logs, allMedications, configuredSymptoms]
+    () => buildMetricRows(logs, allMedications, configuredSymptoms, user?.user_config?.progress_areas ?? []),
+    [logs, allMedications, configuredSymptoms, user]
+  );
+
+  const progressRows = useMemo(
+    () => metricRows.filter((r) => r.key.startsWith("progress-")),
+    [metricRows]
   );
 
   const symptomRows = useMemo(
@@ -335,6 +340,7 @@ export default function InsightsPage() {
             </div>
 
             <MetricGroup title="Symptoms" rows={symptomRows} timeframe={timeframe} onSelect={setSelectedMetric} />
+            <MetricGroup title="Progress" rows={progressRows} timeframe={timeframe} onSelect={setSelectedMetric} />
             <MetricGroup title="Sleep & medications" rows={routineRows} timeframe={timeframe} onSelect={setSelectedMetric} />
           </>
         )}

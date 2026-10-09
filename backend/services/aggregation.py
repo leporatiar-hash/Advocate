@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 import models
+from services.progress import build_progress_stats, progress_areas_config, progress_for_prompt
 from services.med_schedule import as_needed_usage, is_as_needed, log_adherence_doses, log_doses
 
 # Exact-match preset buttons the log UI writes (80/48/24oz), not a continuous scale.
@@ -383,6 +384,7 @@ def build_patient_aggregate(
             "activities": log.activities,
             "lifestyle": log.lifestyle,
             "vitals": _log_vitals_for_prompt(log),
+            "progress": progress_for_prompt(log.progress),
             "medications_taken": log_doses(log),
             "medication_side_effects": log.medication_side_effects,
             "notes": log.notes,
@@ -427,6 +429,11 @@ def build_patient_aggregate(
         "observation_periods": group_observation_periods(logs),
         "as_needed_usage": as_needed_usage(logs, medications),
         "custom_vital_stats": build_custom_vital_stats(logs),
+        "progress_stats": build_progress_stats(
+            logs,
+            progress_areas_config(patient.caregiver.user_config if patient and patient.caregiver else None),
+            medications,
+        ),
     }
 
 

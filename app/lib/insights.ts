@@ -1,4 +1,21 @@
-import type { DailyLog, Medication } from "./types";
+import type { DailyLog, Medication, ProgressArea } from "./types";
+import { COMPARE_TO_NUMBER, progressKey, readProgress } from "./progress";
+
+// Progress areas (higher is better): "score" is a 0–10 rating, "vs usual"
+// is Worse/Same/Better plotted as -1/0/+1. Kept off "/10" on purpose — that
+// unit means symptom severity everywhere on these pages.
+export const PROGRESS_SCORE_UNIT = "score";
+export const PROGRESS_COMPARE_UNIT = "vs usual";
+
+export function extractProgress(logs: DailyLog[], name: string): MetricPoint[] {
+  const out: MetricPoint[] = [];
+  for (const l of logs) {
+    const r = readProgress(l.progress).ratings[name];
+    if (!r) continue;
+    out.push({ date: l.date, value: r.scale === "numeric" ? r.value : COMPARE_TO_NUMBER[r.value] });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
 import { localDateStr } from "./api";
 
 // ── Core types ────────────────────────────────────────────────────────────────
@@ -301,7 +318,9 @@ export function computeObservations(logs: DailyLog[]): Observation[] {
 
 // ── Build all metric rows ─────────────────────────────────────────────────────
 
-export function buildMetricRows(logs: DailyLog[], medications: Medication[], configuredSymptoms: string[] = []): MetricRow[] {
+export function buildMetricRows(
+  logs: DailyLog[], medications: Medication[], configuredSymptoms: string[] = [], progressAreas: ProgressArea[] = [],
+): MetricRow[] {
   const sorted = [...logs].sort((a, b) => a.date.localeCompare(b.date));
 
   function row(
@@ -375,6 +394,12 @@ export function buildMetricRows(logs: DailyLog[], medications: Medication[], con
     if (r) rows.push(r);
   }
 
+  for (const area of progressAreas) {
+    const unit = area.scale === "numeric" ? PROGRESS_SCORE_UNIT : PROGRESS_COMPARE_UNIT;
+    const r = row(progressKey(area.name), area.name, unit, true, extractProgress(sorted, area.name));
+    if (r) rows.push(r);
+  }
+
   return rows;
 }
 
@@ -388,7 +413,16 @@ export interface MetricConfig {
   extract: (logs: DailyLog[]) => MetricPoint[];
 }
 
-export function getMetricConfig(key: string, medications: Medication[]): MetricConfig | null {
+export function getMetricConfig(key: string, medications: Medication[], progressAreas: ProgressArea[] = []): MetricConfig | null {
+  const area = progressAreas.find((a) => progressKey(a.name) === key);
+  if (area) {
+    return {
+      label: area.name,
+      unit: area.scale === "numeric" ? PROGRESS_SCORE_UNIT : PROGRESS_COMPARE_UNIT,
+      higherIsBetter: true, color: "#4a7c59",
+      extract: (l) => extractProgress(l, area.name),
+    };
+  }
   if (key === "sleep") return { label: "Sleep", unit: "hrs", higherIsBetter: true, color: "#3B82F6", extract: extractSleep };
   if (key === "water") return { label: "Water intake", unit: "oz", higherIsBetter: true, color: "#06B6D4", extract: extractWater };
   if (key === "smoked") return { label: "Cigarettes", unit: "days", higherIsBetter: false, color: "#F97316", extract: (l) => extractLifestyle(l, "smoked") };
@@ -415,6 +449,8 @@ export function getMetricConfig(key: string, medications: Medication[]): MetricC
 // ── Format helpers ────────────────────────────────────────────────────────────
 
 export function formatValue(value: number, unit: string): string {
+  if (unit === PROGRESS_SCORE_UNIT) return `${value.toFixed(value % 1 ? 1 : 0)}/10`;
+  if (unit === PROGRESS_COMPARE_UNIT) return value > 0.33 ? "Better" : value < -0.33 ? "Worse" : "Same";
   if (unit === "%") return `${value.toFixed(0)}%`;
   if (unit === "/10") return value.toFixed(1);
   if (unit === "hrs") return `${value.toFixed(1)}h`;
@@ -445,6 +481,8 @@ export function formatChange(change: number | null, unit: string, higherIsBetter
 // Fixed y-scale per kind of metric, so a chart never stretches a small change
 // to fill the box and sleep/adherence aren't drawn on the 0–10 symptom scale.
 export function metricDomain(unit: string, points: MetricPoint[] = []): [number, number] {
+  if (unit === PROGRESS_SCORE_UNIT) return [0, 10];
+  if (unit === PROGRESS_COMPARE_UNIT) return [-1, 1];
   if (unit === "/10") return [0, 10];
   if (unit === "%") return [0, 100];
   if (unit === "hrs") return [0, Math.max(12, Math.ceil(Math.max(0, ...points.map(p => p.value)) / 4) * 4)];

@@ -10,7 +10,8 @@ import { NavBar } from "../../components/NavBar";
 import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS, PRESET_TRACKING, DEFAULT_TRACKING } from "../../lib/constants";
 import { MedicationManager } from "../../components/MedicationForm";
 import { normalizeCustomVitals, vitalLabel } from "../../lib/customVitals";
-import type { User, Patient, SocialContact, CustomVital } from "../../lib/types";
+import { normalizeProgressAreas } from "../../lib/progress";
+import type { User, Patient, SocialContact, CustomVital, ProgressArea, ProgressScale } from "../../lib/types";
 
 // ── UI primitives ─────────────────────────────────────────────────────────────
 
@@ -145,8 +146,15 @@ export default function CustomizePage() {
   const [newContactName, setNewContactName] = useState("");
   const [addingContact, setAddingContact] = useState(false);
 
+  // Progress / improvement areas
+  const [progressAreas, setProgressAreas] = useState<ProgressArea[]>([]);
+  const [newAreaName, setNewAreaName] = useState("");
+  const [newAreaScale, setNewAreaScale] = useState<ProgressScale>("numeric");
+  const [newAreaMedId, setNewAreaMedId] = useState<number | null>(null);
+
   const loadFromUser = useCallback((u: User) => {
     const cfg = u.user_config;
+    setProgressAreas(normalizeProgressAreas(cfg?.progress_areas));
 
     setSymptoms(cfg?.symptoms?.length ? cfg.symptoms : [...DEFAULT_SYMPTOM_NAMES]);
     setActivities(cfg?.activities?.length ? cfg.activities : DEFAULT_ACTIVITY_OPTIONS.map(a => a.type));
@@ -273,6 +281,21 @@ export default function CustomizePage() {
     }
   }
 
+  // ── Progress areas ────────────────────────────────────────────────────────
+
+  function addProgressArea() {
+    const raw = newAreaName.trim();
+    if (!raw) return;
+    const name = raw.charAt(0).toUpperCase() + raw.slice(1);
+    if (progressAreas.some(a => a.name.toLowerCase() === name.toLowerCase())) {
+      toast.error(`${name} is already on the list`);
+      return;
+    }
+    setProgressAreas(prev => [...prev, { name, scale: newAreaScale, medication_id: newAreaMedId }]);
+    setNewAreaName(""); setNewAreaScale("numeric"); setNewAreaMedId(null);
+  }
+  function removeProgressArea(name: string) { setProgressAreas(prev => prev.filter(a => a.name !== name)); }
+
   // ── Save ──────────────────────────────────────────────────────────────────
 
   async function handleSave() {
@@ -284,6 +307,7 @@ export default function CustomizePage() {
         activities,
         tracking_modules: Array.from(trackingModules),
         custom_vitals: customVitals,
+        progress_areas: progressAreas,
         substance_fields: [
           ...(showCigarettes ? ["cigarettes"] : []),
           ...(showAlcohol ? ["alcohol"] : []),
@@ -389,6 +413,75 @@ export default function CustomizePage() {
           )}
           {symptoms.length === 0 && <p className="text-sm text-slate-400">No symptoms added yet.</p>}
           <AddInput placeholder="e.g. Spasticity, Tremor, Vision Issues…" onAdd={handleAddSymptom} />
+        </Section>
+
+        {/* ── Progress & improvements ── */}
+        <Section title="Progress & Improvements"
+          subtitle="Things you hope to see get better — motivation, enjoying activities, insight, a side effect easing. Higher is better here.">
+          {progressAreas.length > 0 ? (
+            <div className="space-y-2">
+              {progressAreas.map(a => {
+                const med = patient?.medications.find(m => m.id === a.medication_id);
+                return (
+                  <div key={a.name} className="flex items-center justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold text-navy truncate">{a.name}</p>
+                      <p className="text-sm text-slate-500">
+                        {a.scale === "numeric" ? "0–10 scale" : "Worse · Same · Better"}
+                        {med && <> · tracking {med.name}</>}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => removeProgressArea(a.name)} aria-label={`Remove ${a.name}`}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 text-lg">×</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">No progress areas yet.</p>
+          )}
+          <div className="space-y-2 pt-1">
+            <input
+              type="text"
+              value={newAreaName}
+              onChange={e => setNewAreaName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addProgressArea()}
+              placeholder="e.g. Motivation, Enjoys activities, Less nighttime salivation"
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy focus:outline-none bg-white"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              {([["numeric", "0–10 scale"], ["compare", "Worse · Same · Better"]] as const).map(([key, label]) => (
+                <button key={key} type="button" onClick={() => setNewAreaScale(key)}
+                  className="py-2.5 rounded-xl text-sm font-semibold border-2 transition-all"
+                  style={{
+                    borderColor: newAreaScale === key ? "#4a7c59" : "#E2E8F0",
+                    background: newAreaScale === key ? "#4a7c59" : "white",
+                    color: newAreaScale === key ? "white" : "#475569",
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label className="block text-sm text-slate-600 space-y-1">
+              <span>Tracking a medication&apos;s effect? (optional)</span>
+              <select
+                value={newAreaMedId ?? ""}
+                onChange={e => setNewAreaMedId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy bg-white"
+              >
+                <option value="">No medication</option>
+                {(patient?.medications ?? []).filter(m => m.active).map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </label>
+            <button type="button" onClick={addProgressArea} disabled={!newAreaName.trim()}
+              className="w-full py-2.5 rounded-xl text-white font-semibold text-sm transition-all disabled:opacity-40"
+              style={{ background: "#4a7c59" }}>
+              Add progress area
+            </button>
+            <p className="text-xs text-slate-400">Remember to tap Save at the bottom of the page.</p>
+          </div>
         </Section>
 
         {/* ── Tracking ── */}

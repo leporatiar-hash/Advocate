@@ -7,7 +7,9 @@ import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { isAsNeeded, removeFalseMisses, scheduleLabel } from "../lib/medSchedule";
 import { customReadings } from "../lib/customVitals";
-import type { Patient, DailyLog, Vitals, SocialContact, Socialization } from "../lib/types";
+import { computeProgressStats } from "../lib/progress";
+import { ProgressSummary } from "../components/ProgressSummary";
+import type { Patient, DailyLog, Vitals, SocialContact, Socialization, ProgressArea } from "../lib/types";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -295,8 +297,9 @@ function Section({
 // ── Clinical report ───────────────────────────────────────────────────────────
 
 function ClinicalReport({
-  patient, logs, userName, contacts,
+  patient, logs, userName, contacts, progressAreas,
 }: {
+  progressAreas: ProgressArea[];
   patient: Patient;
   logs: DailyLog[];
   userName: string | undefined;
@@ -319,6 +322,8 @@ function ClinicalReport({
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const customVitalRows = computeCustomVitals(logs);
+  const progress = computeProgressStats(logs, progressAreas, patient.medications);
+  const hasProgress = Object.keys(progress.areas).length > 0 || progress.wins.length > 0;
   const hasVitals = vitals.hrMin !== null || vitals.bpValues.length > 0 || customVitalRows.length > 0;
 
   return (
@@ -442,6 +447,13 @@ function ClinicalReport({
               </div>
             )}
           </Section>
+
+          {/* ── Progress ── */}
+          {hasProgress && (
+            <Section title="Progress & Improvements" accent="#166534">
+              <ProgressSummary stats={progress} maxWins={10} />
+            </Section>
+          )}
 
           {/* ── Vitals ── */}
           {hasVitals && (
@@ -668,6 +680,7 @@ export default function PrintPage() {
               patient={patient}
               logs={filtered}
               userName={user?.name}
+              progressAreas={user?.user_config?.progress_areas ?? []}
               contacts={contacts}
             />
           )}

@@ -22,6 +22,7 @@ export type ModuleId =
   | "trajectory"
   | "symptomFrequency"
   | "medAdherence"
+  | "progress"
   | "rawNotes"
   | "averages";
 
@@ -81,6 +82,7 @@ export const MODULE_META: { id: ModuleId; label: string; description: string; de
   { id: "trajectory", label: "Temporal Strip", description: "Multi-month adaptive trajectory" },
   { id: "symptomFrequency", label: "Symptom Frequency", description: "Days present and average severity" },
   { id: "medAdherence", label: "Adherence by Medication", description: "Per-drug taken vs expected" },
+  { id: "progress", label: "Progress & Improvements", description: "Caregiver-tracked improvements and wins" },
   { id: "rawNotes", label: "Raw Notes", description: "Caregiver notes, chronological" },
   { id: "averages", label: "Averages", description: "Period averages of key metrics, including sleep", defaultOn: false },
 ];

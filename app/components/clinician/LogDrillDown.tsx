@@ -1,4 +1,5 @@
 import type { DailyLog, MedicationTaken } from "../../lib/types";
+import { hasProgress, ratingText, readProgress } from "../../lib/progress";
 
 const SIMPLE_TIME_LABELS: Record<string, string> = {
   "08:00": "Morning",
@@ -101,6 +102,17 @@ export function LogDrillDown({ log }: { log: DailyLog }) {
                 </span>
               );
             })}
+          </div>
+        </Section>
+      )}
+
+      {hasProgress(readProgress(log.progress)) && (
+        <Section title="Progress">
+          <div className="space-y-1.5 text-sm" style={{ color: "var(--cp-text)" }}>
+            {Object.entries(readProgress(log.progress).ratings).map(([name, r]) => (
+              <p key={name}>{name}: <span className="font-semibold">{ratingText(r)}</span></p>
+            ))}
+            {readProgress(log.progress).wins && <p><span className="font-semibold">Wins: </span>{readProgress(log.progress).wins}</p>}
           </div>
         </Section>
       )}

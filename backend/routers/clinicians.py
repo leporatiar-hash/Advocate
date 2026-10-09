@@ -349,6 +349,7 @@ def get_clinician_portal(
         ),
         "med_adherence": med_adherence,
         "recent_notes": recent_notes,
+        "progress_stats": agg["progress_stats"],
     }
 
 

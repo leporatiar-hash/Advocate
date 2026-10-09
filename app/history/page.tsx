@@ -8,6 +8,7 @@ import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { adherenceEntries, removeFalseMisses } from "../lib/medSchedule";
 import { customReadings, formatReading } from "../lib/customVitals";
+import { hasProgress, ratingText, readProgress } from "../lib/progress";
 import type { Patient, DailyLog, Medication } from "../lib/types";
 
 const SIMPLE_TIME_LABELS: Record<string, string> = {
@@ -265,6 +266,30 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
         </div>
       )}
 
+      {/* Progress */}
+      {hasProgress(readProgress(log.progress)) && (() => {
+        const p = readProgress(log.progress);
+        return (
+          <div>
+            <p className="text-sm font-semibold warm-soft mb-1">Progress</p>
+            {Object.keys(p.ratings).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(p.ratings).map(([name, r]) => (
+                  <span key={name} className="px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: "#e8f0eb", color: "#2d4f38" }}>
+                    {name} · {ratingText(r)}
+                  </span>
+                ))}
+              </div>
+            )}
+            {p.wins && (
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap mt-1.5">
+                <span className="font-semibold">Wins: </span>{p.wins}
+              </p>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Notes */}
       {log.notes?.trim() && (
         <div>
@@ -336,6 +361,9 @@ function DayRow({ log, medications, initiallyOpen }: { log: DailyLog; medication
           )}
           {hasEpisode && (
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #d4e0d7" }}>Episode</span>
+          )}
+          {readProgress(log.progress).wins && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#e8f0eb", color: "#2d4f38" }}>Win</span>
           )}
           <LateTag log={log} />
         </div>

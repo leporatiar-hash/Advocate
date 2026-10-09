@@ -135,6 +135,7 @@ def generate_summary(
             "reviewable_facts": [],
             "as_needed_usage": {},
             "custom_vital_stats": {},
+            "progress_stats": {"areas": {}, "wins": []},
         }
         assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
         if assessment_data:
@@ -206,6 +207,24 @@ def generate_summary(
             line += f"; range {_fmt_num(st['min'])}–{_fmt_num(st['max'])}{u}, average {_fmt_num(st['avg'])}{u}"
         vital_lines.append(f"{line}. Readings: {readings}")
     custom_vitals_text = "\n".join(vital_lines) or "  No custom vitals or lab values recorded."
+
+    # Progress / improvements: the caregiver's own areas, higher = better.
+    progress_lines = []
+    for name, st in agg["progress_stats"]["areas"].items():
+        linked = f" (tracking the effect of {st['linked_medication']})" if st["linked_medication"] else ""
+        if st["scale"] == "numeric":
+            line = f"  - {name}{linked}: {st['count']} rating(s) on a 0–10 scale where 10 is best; average {st['avg']}, latest {_fmt_num(st['latest']['value'])} on {st['latest']['date']}"
+            if st["trend"]:
+                line += f"; {st['trend']} (first-half average {st['first_half_avg']} → second-half {st['last_half_avg']})"
+        else:
+            c = st["counts"]
+            line = f"  - {name}{linked}: compared with usual — better on {c['better']} day(s), same on {c['same']}, worse on {c['worse']}"
+        progress_lines.append(line)
+    wins = agg["progress_stats"]["wins"]
+    if wins:
+        progress_lines.append("  Wins / milestones noted by the caregiver:")
+        progress_lines += [f"    - {w['date']}: {w['text']}" for w in wins]
+    progress_text = "\n".join(progress_lines) or "  No progress areas rated in this period."
 
     # Only state a statistic that actually has a value. A metric with no logged
     # data must be omitted, never rendered as "None" — handing the model a
@@ -316,6 +335,9 @@ AS-NEEDED MEDICATION USE (taken only when needed — these are NEVER missed dose
 CUSTOM VITALS / LAB VALUES (entered by the caregiver when measured — sparse readings are expected and are not gaps in care):
 {custom_vitals_text}
 
+PROGRESS & IMPROVEMENTS (caregiver-defined areas where HIGHER / "better" IS GOOD — the opposite of symptoms; report gains plainly and do not reframe them as problems):
+{progress_text}
+
 AGGREGATED STATISTICS:
 {aggregated_stats_text}
 
@@ -339,6 +361,7 @@ KEY PATTERNS TO ANALYZE:
 - Note missed-dose patterns
 - Note how often as-needed medications were used and whether use clusters around symptom changes
 - Note trends in custom vitals / lab values over time, using only the readings listed above
+- Describe progress and improvements (including any linked medication and the caregiver's wins) as their own findings, using only the trends stated above
 - Highlight week-over-week changes if visible in the raw data
 
 RAW LOG DATA (chronological):
@@ -429,6 +452,7 @@ Please generate a summary as JSON with exactly these fields:
     summary_data["reviewable_facts"] = _build_reviewable_facts(patient.name, adherence)
     summary_data["as_needed_usage"] = {str(mid): d for mid, d in agg["as_needed_usage"].items()}
     summary_data["custom_vital_stats"] = agg["custom_vital_stats"]
+    summary_data["progress_stats"] = agg["progress_stats"]
 
     assessment_data = _build_assessment_data(patient_id, start_date, end_date, db)
     if assessment_data:

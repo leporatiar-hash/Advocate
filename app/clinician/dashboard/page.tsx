@@ -8,6 +8,7 @@ import { ClinicianHeader } from "../../components/clinician/ClinicianHeader";
 import { SymptomFrequencyBars } from "../../components/clinician/SymptomFrequencyBars";
 import { MedAdherenceBars } from "../../components/clinician/MedAdherenceBars";
 import { RecentNotes } from "../../components/clinician/RecentNotes";
+import { ProgressSummary } from "../../components/ProgressSummary";
 import { InsightUnits } from "../../components/clinician/InsightUnits";
 import { GlanceLayer } from "../../components/clinician/GlanceLayer";
 import { WhatChanged } from "../../components/clinician/WhatChanged";
@@ -185,6 +186,19 @@ function DashboardContent() {
             </div>
           </div>
         );
+
+      case "progress": {
+        const ps = loadedPortal.progress_stats;
+        if (!ps || (!Object.keys(ps.areas).length && !ps.wins.length)) return null;
+        return (
+          <div>
+            <SectionTitle>Progress &amp; Improvements</SectionTitle>
+            <div className="rounded-xl border p-4" style={{ background: "#fff", borderColor: "var(--cp-border)" }}>
+              <ProgressSummary stats={ps} inkColor="var(--cp-text)" softColor="var(--cp-text-muted)" />
+            </div>
+          </div>
+        );
+      }
 
       case "averages":
         // The former glance banner, kept as an optional section (off by default).

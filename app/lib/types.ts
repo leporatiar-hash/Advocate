@@ -60,6 +60,7 @@ export interface DashboardConfig {
   dose_timing_mode?: "quick" | "simple" | "exact";
   tracking_modules?: string[]; // "sleep" | "hydration" | "vitals" | custom names
   custom_vitals?: Array<CustomVital | string>; // legacy entries are bare names
+  progress_areas?: ProgressArea[];
   show_socialization?: boolean;
   // Display only — the underlying value logged is still 0-10 either way (no
   // schema change, same DailyLog.symptoms shape). "words" shows a four-tile
@@ -170,6 +171,47 @@ export interface Lifestyle {
   ate_well: boolean;
 }
 
+// ── Progress / improvements (higher / "better" is good) ─────────────────────
+
+export type ProgressScale = "numeric" | "compare";
+export type CompareValue = "worse" | "same" | "better";
+
+// Set up in Settings → Customize. medication_id optionally names the med
+// this area is tracking the effect of (e.g. Motivation → Cariprazine).
+export interface ProgressArea {
+  name: string;
+  scale: ProgressScale;
+  medication_id?: number | null;
+}
+
+export type ProgressRating =
+  | { scale: "numeric"; value: number }
+  | { scale: "compare"; value: CompareValue };
+
+// Stored on DailyLog.progress.
+export interface LogProgress {
+  ratings: Record<string, ProgressRating>;
+  wins: string | null;
+}
+
+export interface ProgressAreaStat {
+  scale: ProgressScale;
+  count: number;
+  readings: { date: string; value: number | CompareValue }[];
+  latest: { date: string; value: number | CompareValue };
+  linked_medication: string | null;
+  avg?: number;
+  trend?: "improving" | "steady" | "declining" | null;
+  first_half_avg?: number;
+  last_half_avg?: number;
+  counts?: Record<CompareValue, number>;
+}
+
+export interface ProgressStats {
+  areas: Record<string, ProgressAreaStat>;
+  wins: { date: string; text: string }[];
+}
+
 export interface DailyLog {
   id: number;
   patient_id: number;
@@ -186,6 +228,7 @@ export interface DailyLog {
   notes: string | null;
   episode: Episode | null;
   vitals: Vitals | null;
+  progress?: LogProgress | null;
   photo: string | null;
   socialization: Socialization | null;
   log_type: "detailed" | "same_as_yesterday" | "nothing_notable" | "catch_up_note" | null;
@@ -257,6 +300,7 @@ export interface SummaryResponse {
   // Server-computed, never AI-generated.
   as_needed_usage?: Record<string, AsNeededUsage>;
   custom_vital_stats?: Record<string, CustomVitalStat>;
+  progress_stats?: ProgressStats;
 }
 
 export interface AsNeededUsage {
@@ -580,6 +624,7 @@ export interface ClinicianPortalResponse {
   adherence_series: AdherenceSeriesBlock;
   med_adherence: MedAdherenceEntry[];
   recent_notes: RecentNote[];
+  progress_stats?: ProgressStats;
 }
 
 export interface SavedSummary {

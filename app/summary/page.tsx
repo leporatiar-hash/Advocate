@@ -7,6 +7,7 @@ import { api, localDateStr } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
+import { ProgressSummary } from "../components/ProgressSummary";
 import type { Patient, SummaryResponse, AdherenceItem, SavedSummary, MedicationSideEffectSummary, AssessmentDataEntry, ReviewableFact, AsNeededUsage, CustomVitalStat } from "../lib/types";
 
 const PRINT_STYLE = `
@@ -692,6 +693,11 @@ export default function SummaryPage() {
             )}
 
             {summary.as_needed_usage && <AsNeededCard data={summary.as_needed_usage} />}
+            {summary.progress_stats && (Object.keys(summary.progress_stats.areas).length > 0 || summary.progress_stats.wins.length > 0) && (
+              <InsightCard title="Progress & Improvements" accentColor="#2d4f38" bgColor="#f2f7f3" borderColor="#d4e0d7">
+                <ProgressSummary stats={summary.progress_stats} />
+              </InsightCard>
+            )}
             {summary.custom_vital_stats && <VitalsStatsCard data={summary.custom_vital_stats} />}
 
             {/* Medication Safety */}

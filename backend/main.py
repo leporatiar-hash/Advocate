@@ -38,6 +38,7 @@ _MIGRATIONS = [
     "ALTER TABLE medications ADD COLUMN IF NOT EXISTS schedule_start_date DATE",
     "ALTER TABLE medications ADD COLUMN IF NOT EXISTS schedule_weekdays JSON",
     "ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS late_kind VARCHAR",
+    "ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS progress JSON",
     "ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS late_saved_at TIMESTAMP",
 ]
 

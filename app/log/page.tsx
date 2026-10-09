@@ -13,7 +13,8 @@ import { MedicationManager } from "../components/MedicationForm";
 import { DictationButton } from "../components/DictationButton";
 import { doseTimesLabel, formatShortDate, isAsNeeded, isDue, nextDueDate, parseDoseTimes, scheduleLabel } from "../lib/medSchedule";
 import { customReadings, normalizeCustomVitals, vitalLabel } from "../lib/customVitals";
-import type { CustomVitalReading, Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome } from "../lib/types";
+import { COMPARE_OPTIONS, emptyProgress, hasProgress, linkedMedName, normalizeProgressAreas, readProgress } from "../lib/progress";
+import type { CustomVitalReading, Patient, Medication, MedicationTaken, Symptom, MedicationSideEffect, Activity, Lifestyle, SocialContact, Socialization, KnownSideEffect, TreatmentPlan, Episode, EpisodeOutcome, LogProgress, ProgressRating } from "../lib/types";
 import { DEFAULT_SYMPTOM_NAMES, DEFAULT_ACTIVITY_OPTIONS } from "../lib/constants";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -326,6 +327,7 @@ interface LogDraft {
   vitals: Vitals;
   photo: string | null; // base64 JPEG data URL (compressed ~50-100 KB)
   socialization: Socialization;
+  progress: LogProgress;
 }
 
 // ── Photo compression ─────────────────────────────────────────────────────────
@@ -375,6 +377,7 @@ function defaultDraft(patientId: number | null, meds: Medication[], date?: strin
     vitals: emptyVitals(),
     photo: null,
     socialization: emptySocialization(),
+    progress: emptyProgress(),
   };
 }
 
@@ -509,6 +512,7 @@ function LogPageInner() {
         quality: savedSoc.quality ?? null,
         initiated_by: savedSoc.initiated_by ?? null,
       } : emptySocialization(),
+      progress: readProgress(logData.progress),
     };
   }, []);
 
@@ -793,6 +797,14 @@ function LogPageInner() {
     return [...list, { medication_id: medId, medication_name: med?.name ?? "", side_effects: [] }];
   }
 
+  // ── Progress ──────────────────────────────────────────────────────────────
+
+  function setProgressRating(name: string, rating: ProgressRating | null) {
+    const ratings = { ...draft!.progress.ratings };
+    if (rating) ratings[name] = rating; else delete ratings[name];
+    update({ progress: { ...draft!.progress, ratings } });
+  }
+
   function toggleSideEffect(medId: number, seName: string) {
     update({
       medicationSideEffects: withSideEffectEntry(medId).map(mse => {
@@ -959,6 +971,7 @@ function LogPageInner() {
       socialization: (d.socialization.left_house !== null || d.socialization.had_contact !== null)
         ? d.socialization
         : null,
+      progress: hasProgress(d.progress) ? d.progress : null,
     });
   }
 
@@ -1207,6 +1220,11 @@ function LogPageInner() {
   };
 
   const customVitals = normalizeCustomVitals(user?.user_config?.custom_vitals);
+  const progressAreas = normalizeProgressAreas(user?.user_config?.progress_areas);
+  const progressRated = Object.keys(draft.progress.ratings).length;
+  const progressText = progressRated || draft.progress.wins?.trim()
+    ? [progressRated && `${progressRated} rated`, draft.progress.wins?.trim() && "win noted"].filter(Boolean).join(" · ")
+    : "Tap to record";
 
   // Dynamic symptom/activity lists — user_config first, fall back to patient config, then defaults
   // Use .length check so empty arrays fall through to the next level (same as missing)
@@ -1751,6 +1769,80 @@ function LogPageInner() {
               </div>
             );
           })}
+        </AccordionSection>
+
+        {/* ── Progress ── */}
+        <AccordionSection id="progress" title="Progress" summaryLine={progressText}
+          bgColor="white" borderColor="#d4e0d7" headingColor="#1a2420"
+          isOpen={openSection === "progress"} onToggle={() => toggle("progress")}>
+          <div className="space-y-5">
+            {progressAreas.length === 0 && (
+              <p className="text-sm text-slate-500">
+                Track what&apos;s getting better — motivation, enjoying activities, insight, a side effect easing.{" "}
+                <Link href="/settings/customize" className="font-semibold" style={{ color: "#4a7c59" }}>Set up progress areas</Link>
+              </p>
+            )}
+            {progressAreas.map(area => {
+              const rating = draft.progress.ratings[area.name];
+              const med = linkedMedName(area, patient.medications);
+              return (
+                <div key={area.name} className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold text-slate-700">{area.name}</p>
+                      {med && <p className="text-xs text-slate-400">Tracking {med}</p>}
+                    </div>
+                    {rating ? (
+                      <button type="button" onClick={() => setProgressRating(area.name, null)}
+                        className="text-xs font-medium text-slate-400 flex-shrink-0">Clear</button>
+                    ) : (
+                      <span className="text-sm text-slate-400 flex-shrink-0">Not rated</span>
+                    )}
+                  </div>
+                  {area.scale === "numeric" ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3">
+                        <input type="range" min={0} max={10} step={1}
+                          value={rating?.scale === "numeric" ? rating.value : 5}
+                          onChange={e => setProgressRating(area.name, { scale: "numeric", value: parseInt(e.target.value) })}
+                          aria-label={`${area.name}, 0 to 10, 10 is best`}
+                          className="flex-1" style={{ opacity: rating ? 1 : 0.45 }} />
+                        <span className="w-12 text-right text-base font-bold" style={{ color: rating ? "#4a7c59" : "#CBD5E1" }}>
+                          {rating?.scale === "numeric" ? `${rating.value}/10` : "–"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs text-slate-400 pr-14">
+                        <span>0 · not at all</span><span>10 · best</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2">
+                      {COMPARE_OPTIONS.map(o => {
+                        const active = rating?.scale === "compare" && rating.value === o.value;
+                        const color = o.value === "better" ? "#4a7c59" : o.value === "worse" ? "#B45309" : "#64748B";
+                        return (
+                          <button key={o.value} type="button"
+                            onClick={() => setProgressRating(area.name, active ? null : { scale: "compare", value: o.value })}
+                            className="py-2.5 rounded-xl text-sm font-semibold border-2 transition-all active:scale-95"
+                            style={{ borderColor: active ? color : "#E2E8F0", background: active ? color : "white", color: active ? "white" : "#475569" }}>
+                            {o.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div className="space-y-1.5">
+              <label htmlFor="progress-wins" className="text-base font-semibold text-slate-700">Wins today</label>
+              <textarea id="progress-wins" rows={2}
+                value={draft.progress.wins ?? ""}
+                onChange={e => update({ progress: { ...draft.progress, wins: e.target.value || null } })}
+                placeholder="e.g. Made plans to visit a friend, talked openly about his illness"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 text-navy text-base focus:outline-none bg-white resize-none" />
+            </div>
+          </div>
         </AccordionSection>
 
         {/* ── Episode ── */}
