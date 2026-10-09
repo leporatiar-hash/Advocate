@@ -166,6 +166,11 @@ class LogType(str, Enum):
     nothing_notable = "nothing_notable"
 
 
+class ProgressAreaRename(BaseModel):
+    old_name: str
+    new_name: str
+
+
 class QuickLogRequest(BaseModel):
     date: date
     # The caregiver's local "today" — marks saves for an earlier day as late.

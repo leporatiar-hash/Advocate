@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, defer
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional
 from datetime import datetime, timedelta, date as date_type
 
@@ -353,6 +354,40 @@ def quick_log(
     db.commit()
     db.refresh(log)
     return log
+
+
+@router.post("/{patient_id}/progress-area/rename")
+def rename_progress_area(
+    patient_id: int,
+    body: schemas.ProgressAreaRename,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_not_clinician),
+):
+    """Carry a progress area's past ratings over to its new name, so
+    rewording an area in Settings keeps one history instead of leaving the
+    old wording behind as a separate area. A day that somehow already has a
+    rating under the new name keeps that one."""
+    _verify_patient(patient_id, current_user, db)
+    old, new = body.old_name.strip(), body.new_name.strip()
+    if not old or not new:
+        raise HTTPException(status_code=400, detail="Both names are required")
+    if old == new:
+        return {"updated": 0}
+    updated = 0
+    logs = db.query(models.DailyLog).filter(models.DailyLog.patient_id == patient_id).all()
+    for log in logs:
+        progress = log.progress if isinstance(log.progress, dict) else None
+        ratings = (progress or {}).get("ratings") or {}
+        if old not in ratings:
+            continue
+        ratings = dict(ratings)
+        moved = ratings.pop(old)
+        ratings.setdefault(new, moved)
+        log.progress = {**progress, "ratings": ratings}
+        flag_modified(log, "progress")
+        updated += 1
+    db.commit()
+    return {"updated": updated}
 
 
 @router.patch("/{patient_id}/date/{date_str}/medication-taken")

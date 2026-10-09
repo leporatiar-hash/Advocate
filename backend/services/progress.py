@@ -58,15 +58,17 @@ def _ratings(log) -> dict:
 
 def build_progress_stats(logs, areas: list, medications: list) -> dict:
     """{"areas": {name: stats}, "wins": [{date, text}]} over date-ascending
-    `logs`. Areas that were rated but later removed from Settings are still
-    reported (their readings are real); configured areas never rated are
-    omitted."""
+    `logs`. Only areas currently set up in Settings are reported — an area
+    the caregiver removed or reworded must not linger beside its
+    replacement; configured areas never rated are omitted."""
     med_names = {m.id: m.name for m in medications}
     config = {a["name"]: a for a in areas}
     readings: dict = {}
     wins = []
     for log in logs:
         for name, (scale, value) in _ratings(log).items():
+            if name not in config:
+                continue
             readings.setdefault(name, {"scale": scale, "points": []})["points"].append(
                 {"date": log.date.isoformat(), "value": value}
             )

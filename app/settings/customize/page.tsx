@@ -152,11 +152,18 @@ export default function CustomizePage() {
   const [newAreaName, setNewAreaName] = useState("");
   const [newAreaScale, setNewAreaScale] = useState<ProgressScale>("numeric");
   const [newAreaMedId, setNewAreaMedId] = useState<number | null>(null);
+  // Rewording an area renames it in place: current name -> name as last saved,
+  // so Save can move the old ratings over instead of leaving a duplicate.
+  const [areaRenames, setAreaRenames] = useState<Record<string, string>>({});
+  const [editingArea, setEditingArea] = useState<number | null>(null);
+  const [editAreaName, setEditAreaName] = useState("");
+  const [editAreaMedId, setEditAreaMedId] = useState<number | null>(null);
 
   const loadFromUser = useCallback((u: User) => {
     const cfg = u.user_config;
     setTrackProgress(cfg?.track_progress === true);
     setProgressAreas(normalizeProgressAreas(cfg?.progress_areas));
+    setAreaRenames({});
 
     setSymptoms(cfg?.symptoms?.length ? cfg.symptoms : [...DEFAULT_SYMPTOM_NAMES]);
     setActivities(cfg?.activities?.length ? cfg.activities : DEFAULT_ACTIVITY_OPTIONS.map(a => a.type));
@@ -296,7 +303,37 @@ export default function CustomizePage() {
     setProgressAreas(prev => [...prev, { name, scale: newAreaScale, medication_id: newAreaMedId }]);
     setNewAreaName(""); setNewAreaScale("numeric"); setNewAreaMedId(null);
   }
-  function removeProgressArea(name: string) { setProgressAreas(prev => prev.filter(a => a.name !== name)); }
+  function removeProgressArea(name: string) {
+    setProgressAreas(prev => prev.filter(a => a.name !== name));
+    setAreaRenames(prev => { const next = { ...prev }; delete next[name]; return next; });
+  }
+  function startEditArea(i: number) {
+    setEditingArea(i);
+    setEditAreaName(progressAreas[i].name);
+    setEditAreaMedId(progressAreas[i].medication_id ?? null);
+  }
+  function saveEditArea() {
+    if (editingArea === null) return;
+    const old = progressAreas[editingArea];
+    const raw = editAreaName.trim();
+    if (!raw) return;
+    const name = raw.charAt(0).toUpperCase() + raw.slice(1);
+    if (name.toLowerCase() !== old.name.toLowerCase() && progressAreas.some(a => a.name.toLowerCase() === name.toLowerCase())) {
+      toast.error(`${name} is already on the list`);
+      return;
+    }
+    setProgressAreas(prev => prev.map((a, i) => i === editingArea ? { ...a, name, medication_id: editAreaMedId } : a));
+    if (name !== old.name) {
+      setAreaRenames(prev => {
+        const next = { ...prev };
+        const original = next[old.name] ?? old.name;
+        delete next[old.name];
+        if (original !== name) next[name] = original;
+        return next;
+      });
+    }
+    setEditingArea(null);
+  }
 
   // ── Save ──────────────────────────────────────────────────────────────────
 
@@ -319,7 +356,14 @@ export default function CustomizePage() {
         symptom_scale: symptomScale,
         show_socialization: showSocialization,
       };
+      // Move ratings saved under an area's old wording before saving the new list.
+      if (patient) {
+        for (const [current, original] of Object.entries(areaRenames)) {
+          await api.renameProgressArea(patient.id, original, current);
+        }
+      }
       const updated = await api.updateUserConfig(updates) as User;
+      setAreaRenames({});
       updateUser(updated);
       toast.success("Saved");
     } catch (err: unknown) {
@@ -427,17 +471,41 @@ export default function CustomizePage() {
           {trackProgress && (<>
           {progressAreas.length > 0 ? (
             <div className="space-y-2">
-              {progressAreas.map(a => {
+              {progressAreas.map((a, i) => {
                 const med = patient?.medications.find(m => m.id === a.medication_id);
+                if (editingArea === i) {
+                  return (
+                    <div key={i} className="space-y-2 py-2 border-b border-slate-100 last:border-0">
+                      <input type="text" value={editAreaName} onChange={e => setEditAreaName(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && saveEditArea()}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy focus:outline-none bg-white" />
+                      <select value={editAreaMedId ?? ""} onChange={e => setEditAreaMedId(e.target.value ? Number(e.target.value) : null)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-base text-navy bg-white">
+                        <option value="">No medication</option>
+                        {(patient?.medications ?? []).filter(m => m.active).map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-slate-400">Past ratings move to the new name when you tap Save.</p>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setEditingArea(null)}
+                          className="flex-1 py-2 rounded-xl font-semibold text-sm border-2 border-slate-200 text-slate-500">Cancel</button>
+                        <button type="button" onClick={saveEditArea} disabled={!editAreaName.trim()}
+                          className="flex-1 py-2 rounded-xl text-white font-semibold text-sm disabled:opacity-40" style={{ background: "#4a7c59" }}>Done</button>
+                      </div>
+                    </div>
+                  );
+                }
                 return (
-                  <div key={a.name} className="flex items-center justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
-                    <div className="min-w-0">
+                  <div key={i} className="flex items-center justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+                    <button type="button" onClick={() => startEditArea(i)} className="min-w-0 text-left flex-1">
                       <p className="text-base font-semibold text-navy truncate">{a.name}</p>
                       <p className="text-sm text-slate-500">
                         {a.scale === "numeric" ? "0–10 scale" : "Worse · Same · Better"}
                         {med && <> · tracking {med.name}</>}
+                        <span className="ml-2 font-semibold" style={{ color: "#4a7c59" }}>Edit</span>
                       </p>
-                    </div>
+                    </button>
                     <button type="button" onClick={() => removeProgressArea(a.name)} aria-label={`Remove ${a.name}`}
                       className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 text-lg">×</button>
                   </div>

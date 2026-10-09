@@ -37,7 +37,10 @@ def test_compare_counts_wins_and_bad_values():
              log_type="same_as_yesterday"),
         _log(3, {"Salivation": {"scale": "compare", "value": "nonsense"}}),
     ]
-    out = build_progress_stats(logs, [], [])
+    areas = progress_areas_config({"progress_areas": [
+        {"name": "Salivation", "scale": "compare"}, {"name": "Insight", "scale": "numeric"},
+    ]})
+    out = build_progress_stats(logs, areas, [])
     assert out["areas"]["Salivation"]["counts"] == {"worse": 0, "same": 1, "better": 2}
     assert "Insight" not in out["areas"]
     assert out["wins"] == [{"date": "2026-10-01", "text": "Made plans to see a friend"}]
@@ -64,3 +67,29 @@ def test_progress_round_trips_through_api(client):
         db.close()
     assert agg["progress_stats"]["areas"]["Motivation"]["avg"] == 6.0
     assert agg["progress_stats"]["wins"][0]["text"] == "Went for a walk"
+
+
+def test_removed_area_hidden():
+    logs = [_log(0, {"Old wording": {"scale": "numeric", "value": 4}, "New wording": {"scale": "numeric", "value": 6}})]
+    areas = progress_areas_config({"progress_areas": [{"name": "New wording", "scale": "numeric"}]})
+    assert list(build_progress_stats(logs, areas, [])["areas"]) == ["New wording"]
+
+
+def test_rename_carries_history(client):
+    email = "rename@example.com"
+    resp = client.post("/auth/register", json={"email": email, "password": "testpass123", "name": "R", "role": "caregiver"})
+    if resp.status_code != 200:
+        resp = client.post("/auth/login", json={"email": email, "password": "testpass123"})
+    h = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    pid = client.post("/patients/", headers=h, json={"name": "Leo", "diagnosis": "x"}).json()["id"]
+    for day, v in (("2026-10-01", 3), ("2026-10-02", 5)):
+        client.post("/logs/", headers=h, json={"patient_id": pid, "date": day, "notes": "keep",
+                    "progress": {"ratings": {"Salivation": {"scale": "compare", "value": "better"},
+                                             "Motivation": {"scale": "numeric", "value": v}}, "wins": "w"}})
+    r = client.post(f"/logs/{pid}/progress-area/rename", headers=h,
+                    json={"old_name": "Salivation", "new_name": "Less nighttime salivation"})
+    assert r.json() == {"updated": 2}
+    logs = client.get(f"/logs/{pid}", headers=h).json()
+    for log in logs:
+        assert set(log["progress"]["ratings"]) == {"Less nighttime salivation", "Motivation"}
+        assert log["progress"]["wins"] == "w" and log["notes"] == "keep"

@@ -170,6 +170,11 @@ export const api = {
     }),
 
   // User config
+  // Moves a progress area's past ratings to its new name (Settings rename).
+  renameProgressArea: (patientId: number, oldName: string, newName: string) =>
+    request(`/logs/${patientId}/progress-area/rename`, {
+      method: "POST", body: JSON.stringify({ old_name: oldName, new_name: newName }),
+    }),
   updateUserConfig: (updates: object) =>
     request("/auth/config", { method: "PATCH", body: JSON.stringify({ updates }) }),
 

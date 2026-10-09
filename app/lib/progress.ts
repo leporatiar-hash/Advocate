@@ -76,6 +76,8 @@ export function computeProgressStats(
   for (const log of sorted) {
     const p = readProgress(log.progress);
     for (const [name, r] of Object.entries(p.ratings)) {
+      // Only areas currently set up — removed or reworded ones don't linger.
+      if (!areas.some(a => a.name === name)) continue;
       const entry = byName.get(name) ?? { scale: r.scale, points: [] };
       entry.points.push({ date: log.date, value: r.value });
       byName.set(name, entry);
