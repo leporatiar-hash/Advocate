@@ -477,7 +477,15 @@ function LogPageInner() {
       patientId: p.id,
       medicationsTaken: takenDoses,
       symptoms: (logData.symptoms as Symptom[]) ?? [],
-      medicationSideEffects: (logData.medication_side_effects as MedicationSideEffect[]) ?? p.medications.filter(m => m.active).map(m => ({ medication_id: m.id, medication_name: m.name, side_effects: [] })),
+      // Saved logs only store meds that had side effects, so re-add an empty
+      // entry for every other active med — otherwise their side-effect
+      // buttons have nothing to update and silently do nothing.
+      medicationSideEffects: [
+        ...((logData.medication_side_effects as MedicationSideEffect[] | null) ?? []),
+        ...p.medications
+          .filter(m => m.active && !((logData.medication_side_effects as MedicationSideEffect[] | null) ?? []).some(e => e.medication_id === m.id))
+          .map(m => ({ medication_id: m.id, medication_name: m.name, side_effects: [] })),
+      ],
       sleepHours: logData.sleep_hours as number | null,
       hydration: hydrPreset,
       lifestyle: (logData.lifestyle as Lifestyle | null) ?? { smoked: false, alcohol: false, stressed: false, ate_well: false },
@@ -776,9 +784,18 @@ function LogPageInner() {
 
   // ── Side effects ──────────────────────────────────────────────────────────
 
+  // Every update goes through this, so a med with no entry yet gets one
+  // instead of the change being dropped.
+  function withSideEffectEntry(medId: number): MedicationSideEffect[] {
+    const list = draft!.medicationSideEffects;
+    if (list.some(m => m.medication_id === medId)) return list;
+    const med = patient?.medications.find(m => m.id === medId);
+    return [...list, { medication_id: medId, medication_name: med?.name ?? "", side_effects: [] }];
+  }
+
   function toggleSideEffect(medId: number, seName: string) {
     update({
-      medicationSideEffects: draft!.medicationSideEffects.map(mse => {
+      medicationSideEffects: withSideEffectEntry(medId).map(mse => {
         if (mse.medication_id !== medId) return mse;
         const has = mse.side_effects.some(se => se.name === seName);
         return { ...mse, side_effects: has ? mse.side_effects.filter(se => se.name !== seName) : [...mse.side_effects, { name: seName, severity: 5 }] };
@@ -788,7 +805,7 @@ function LogPageInner() {
 
   function setSideEffectSeverity(medId: number, seName: string, severity: number) {
     update({
-      medicationSideEffects: draft!.medicationSideEffects.map(mse =>
+      medicationSideEffects: withSideEffectEntry(medId).map(mse =>
         mse.medication_id !== medId ? mse : { ...mse, side_effects: mse.side_effects.map(se => se.name === seName ? { ...se, severity } : se) }
       ),
     });
