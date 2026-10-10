@@ -256,7 +256,7 @@ function MedSafetyCard({ data }: { data: Record<string, MedicationSideEffectSumm
                 )}
               </div>
 
-              {info.clinical_note && (
+              {hasObserved && info.clinical_note && (
                 <p className="text-sm leading-relaxed italic" style={{ color: "#475569" }}>{info.clinical_note}</p>
               )}
             </div>
