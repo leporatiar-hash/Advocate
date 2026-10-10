@@ -9,6 +9,7 @@ import { NavBar } from "../components/NavBar";
 import { adherenceEntries, removeFalseMisses } from "../lib/medSchedule";
 import { customReadings, formatReading } from "../lib/customVitals";
 import { hasProgress, ratingText, readProgress } from "../lib/progress";
+import { EpisodeFollowUp } from "../components/EpisodeFollowUp";
 import type { Patient, DailyLog, Medication } from "../lib/types";
 
 const SIMPLE_TIME_LABELS: Record<string, string> = {
@@ -235,6 +236,7 @@ function LogDetail({ log, medications }: { log: DailyLog; medications: Medicatio
             {log.episode.description || "Episode logged with no description."}
             {log.episode.time ? <span className="text-slate-400"> · {log.episode.time}</span> : ""}
           </p>
+          <EpisodeFollowUp episode={log.episode} className="text-sm text-slate-600 mt-1" />
         </div>
       )}
 

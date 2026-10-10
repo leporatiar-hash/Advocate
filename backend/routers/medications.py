@@ -19,6 +19,44 @@ router = APIRouter()
 # Includes generic names and common brand names as separate keys pointing to same effects.
 
 _KNOWN_SIDE_EFFECTS: dict[str, list[dict]] = {
+    # Quick-pick suggestions in the daily log only. Reports never label an
+    # observed side effect as expected/unexpected against this list — it is
+    # incomplete by nature, and a missing entry (Clozapine was) made common,
+    # dangerous effects like constipation read as "unexpected".
+    "clozapine": [
+        {"name": "Sedation", "frequency": "common", "category": "neurological"},
+        {"name": "Constipation", "frequency": "common", "category": "GI"},
+        {"name": "Hypersalivation", "frequency": "common", "category": "GI"},
+        {"name": "Weight gain", "frequency": "common", "category": "metabolic"},
+        {"name": "Increased appetite", "frequency": "common", "category": "metabolic"},
+        {"name": "Fast heart rate", "frequency": "common", "category": "cardiovascular"},
+        {"name": "Dizziness", "frequency": "common", "category": "neurological"},
+        {"name": "Fever", "frequency": "uncommon", "category": "general"},
+    ],
+    "clozaril": [
+        {"name": "Sedation", "frequency": "common", "category": "neurological"},
+        {"name": "Constipation", "frequency": "common", "category": "GI"},
+        {"name": "Hypersalivation", "frequency": "common", "category": "GI"},
+        {"name": "Weight gain", "frequency": "common", "category": "metabolic"},
+        {"name": "Increased appetite", "frequency": "common", "category": "metabolic"},
+        {"name": "Fast heart rate", "frequency": "common", "category": "cardiovascular"},
+        {"name": "Dizziness", "frequency": "common", "category": "neurological"},
+        {"name": "Fever", "frequency": "uncommon", "category": "general"},
+    ],
+    "cariprazine": [
+        {"name": "Restlessness (akathisia)", "frequency": "common", "category": "neurological"},
+        {"name": "Insomnia", "frequency": "common", "category": "psychiatric"},
+        {"name": "Nausea", "frequency": "common", "category": "GI"},
+        {"name": "Drowsiness", "frequency": "common", "category": "neurological"},
+        {"name": "Tremor", "frequency": "common", "category": "neurological"},
+    ],
+    "vraylar": [
+        {"name": "Restlessness (akathisia)", "frequency": "common", "category": "neurological"},
+        {"name": "Insomnia", "frequency": "common", "category": "psychiatric"},
+        {"name": "Nausea", "frequency": "common", "category": "GI"},
+        {"name": "Drowsiness", "frequency": "common", "category": "neurological"},
+        {"name": "Tremor", "frequency": "common", "category": "neurological"},
+    ],
     "sertraline": [
         {"name": "Nausea", "frequency": "common", "category": "GI"},
         {"name": "Diarrhea", "frequency": "common", "category": "GI"},

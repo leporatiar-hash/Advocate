@@ -115,6 +115,32 @@ export function extractOverallAdherence(logs: DailyLog[]): MetricPoint[] {
 
 // ── Change computation ────────────────────────────────────────────────────────
 
+// Sleep is a target, not "more is better": 15 hours is not a good night.
+// With a caregiver-set goal (Settings → Tracking), a change is better when
+// it moves closer to the goal; without one, sleep changes are left neutral.
+export const SLEEP_ON_TARGET_HOURS = 1;
+
+export function sleepGoalOf(cfg: { sleep_goal_hours?: number | null } | null | undefined): number | null {
+  const g = cfg?.sleep_goal_hours;
+  return typeof g === "number" && g > 0 ? g : null;
+}
+
+export function movedTowardGoal(beforeAvg: number, afterAvg: number, goal: number): boolean {
+  return Math.abs(afterAvg - goal) < Math.abs(beforeAvg - goal);
+}
+
+export function compute7dAvgs(points: MetricPoint[]): { recent: number; prior: number } | null {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  const priorCutoff = new Date();
+  priorCutoff.setDate(priorCutoff.getDate() - 14);
+  const recent = points.filter((p) => p.date >= localDateStr(cutoff));
+  const prior = points.filter((p) => p.date >= localDateStr(priorCutoff) && p.date < localDateStr(cutoff));
+  if (!recent.length || !prior.length) return null;
+  const avg = (xs: MetricPoint[]) => xs.reduce((s, p) => s + p.value, 0) / xs.length;
+  return { recent: avg(recent), prior: avg(prior) };
+}
+
 export function compute7dChange(points: MetricPoint[]): number | null {
   if (!points.length) return null;
   const cutoff = new Date();

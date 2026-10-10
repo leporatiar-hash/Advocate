@@ -9,7 +9,7 @@ import { useAuth } from "../../components/AuthProvider";
 import { NavBar } from "../../components/NavBar";
 import {
   getMetricConfig, filterByTimeframe, aggregateWeekly, extractEvents,
-  computeObservations, formatValue, compute7dChange, metricDomain, severityWord,
+  computeObservations, formatValue, compute7dChange, compute7dAvgs, movedTowardGoal, sleepGoalOf, SLEEP_ON_TARGET_HOURS, metricDomain, severityWord,
   EVENT_COLORS, EVENT_LABELS,
   type MetricPoint, type EventMarker, type Timeframe,
 } from "../../lib/insights";
@@ -309,7 +309,13 @@ export default function MetricDetailClient({ metricKey, onBack }: { metricKey: s
 
   const changeThreshold = config?.unit === "%" ? 2 : 0.3;
   const changeMoved = change7d !== null && Math.abs(change7d) >= changeThreshold;
-  const changeBetter = changeMoved && config ? ((change7d! > 0) === config.higherIsBetter) : false;
+  // Sleep: better means closer to the caregiver's goal; with no goal, neutral.
+  const sleepGoal = metricKey === "sleep" ? sleepGoalOf(user?.user_config) : null;
+  const sleepAvgs = metricKey === "sleep" ? compute7dAvgs(allPoints) : null;
+  const changeBetter: boolean | null = !changeMoved || !config ? false
+    : metricKey !== "sleep" ? ((change7d! > 0) === config.higherIsBetter)
+    : sleepGoal && sleepAvgs ? movedTowardGoal(sleepAvgs.prior, sleepAvgs.recent, sleepGoal)
+    : null;
 
   if (isLoading || dataLoading) {
     return (
@@ -415,11 +421,13 @@ export default function MetricDetailClient({ metricKey, onBack }: { metricKey: s
             <p className="text-sm mt-1" style={{ color: WARM.inkSoft }}>
               {changeMoved ? (
                 <>
-                  <span style={{ color: changeBetter ? WARM.better : WARM.worse, fontWeight: 600 }}>
+                  <span style={{ color: changeBetter === null ? WARM.ink : changeBetter ? WARM.better : WARM.worse, fontWeight: 600 }}>
                     {change7d > 0 ? "↑ " : "↓ "}
                     {config.unit === "%" ? `${Math.abs(change7d).toFixed(0)}%` : config.unit === "hrs" ? `${Math.abs(change7d).toFixed(1)}h` : Math.abs(change7d).toFixed(1)}
                   </span>
-                  {" "}compared with the week before ({changeBetter ? "better" : "worse"})
+                  {" "}compared with the week before{changeBetter === null ? "" : changeBetter
+                    ? (sleepGoal ? " (closer to the goal)" : " (better)")
+                    : (sleepGoal ? " (further from the goal)" : " (worse)")}
                 </>
               ) : "About the same as the week before"}
             </p>
@@ -458,6 +466,28 @@ export default function MetricDetailClient({ metricKey, onBack }: { metricKey: s
                 const worst = lowBest ? Math.max(...vals) : Math.min(...vals);
                 const fmt = (v: number) => config.unit === "/10" ? `${v.toFixed(v % 1 ? 1 : 0)}/10` : formatValue(v, config.unit);
                 const sub = (v: number) => config.unit === "/10" ? severityWord(v) : "";
+                if (metricKey === "sleep") {
+                  // Never call the longest night the "best" — judge against the goal.
+                  const furthest = sleepGoal ? vals.reduce((m, v) => Math.abs(v - sleepGoal) > Math.abs(m - sleepGoal) ? v : m, vals[0]) : null;
+                  const onTarget = sleepGoal ? vals.filter(v => Math.abs(v - sleepGoal) <= SLEEP_ON_TARGET_HOURS).length : 0;
+                  const tiles = sleepGoal
+                    ? [
+                        { label: `Average (goal ${sleepGoal}h)`, text: fmt(avg) },
+                        { label: `Nights within ${SLEEP_ON_TARGET_HOURS}h of goal`, text: `${onTarget} of ${vals.length}` },
+                        { label: "Furthest from goal", text: fmt(furthest!) },
+                      ]
+                    : [
+                        { label: "Average", text: fmt(avg) },
+                        { label: "Longest", text: fmt(Math.max(...vals)) },
+                        { label: "Shortest", text: fmt(Math.min(...vals)) },
+                      ];
+                  return tiles.map(t => (
+                    <div key={t.label} className="text-center rounded-xl py-3 px-1" style={{ background: WARM.cream }}>
+                      <p className="text-base font-semibold" style={{ color: WARM.ink }}>{t.text}</p>
+                      <p className="text-xs mt-0.5" style={{ color: WARM.inkSoft }}>{t.label}</p>
+                    </div>
+                  ));
+                }
                 return [
                   { label: "Average", v: avg },
                   { label: "Best day", v: best },
@@ -472,6 +502,12 @@ export default function MetricDetailClient({ metricKey, onBack }: { metricKey: s
               })()}
             </div>
           </div>
+        )}
+
+        {metricKey === "sleep" && !sleepGoal && (
+          <p className="text-sm px-1" style={{ color: WARM.inkSoft }}>
+            More sleep isn&apos;t always better. <Link href="/settings/customize" style={{ color: WARM.sage, fontWeight: 600 }}>Set a sleep goal</Link> to see nights compared with it.
+          </p>
         )}
 
         {/* Observations */}

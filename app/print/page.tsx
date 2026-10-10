@@ -9,6 +9,7 @@ import { isAsNeeded, removeFalseMisses, scheduleLabel } from "../lib/medSchedule
 import { customReadings } from "../lib/customVitals";
 import { computeProgressStats } from "../lib/progress";
 import { ProgressSummary } from "../components/ProgressSummary";
+import { EpisodeFollowUp } from "../components/EpisodeFollowUp";
 import type { Patient, DailyLog, Vitals, SocialContact, Socialization, ProgressArea } from "../lib/types";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -79,39 +80,49 @@ function computeMedAggregates(logs: DailyLog[], patient: Patient): MedRow[] {
     .filter(r => r.trackedDays > 0 || r.asNeeded);
 }
 
+// Severity over the period, not just how often a symptom was logged — a
+// caregiver who logs every symptom daily would otherwise see "8 / 8" for
+// everything. Higher severity is worse.
 interface SymptomRow {
   name: string;
-  daysReported: number;
-  totalDays: number;
-  lastDate: string;
+  avg: number;
+  first: { value: number; date: string };
+  latest: { value: number; date: string };
+  peak: { value: number; date: string };
+  change: "worse" | "better" | "steady" | null; // null = a single rating
 }
 
 function computeSymptomTable(logs: DailyLog[]): SymptomRow[] {
-  const map = new Map<string, { count: number; lastDate: string }>();
-  const total = logs.length;
-  for (const log of logs) {
+  const series = new Map<string, { value: number; date: string }[]>();
+  for (const log of [...logs].sort((a, b) => a.date.localeCompare(b.date))) {
     const seen = new Set<string>();
-    for (const s of (log.symptoms ?? [])) {
-      if (seen.has(s.name)) continue;
-      seen.add(s.name);
-      const existing = map.get(s.name);
-      if (existing) {
-        existing.count++;
-        if (log.date > existing.lastDate) existing.lastDate = log.date;
-      } else {
-        map.set(s.name, { count: 1, lastDate: log.date });
-      }
+    for (const sym of (log.symptoms ?? [])) {
+      if (seen.has(sym.name) || typeof sym.severity !== "number") continue;
+      seen.add(sym.name);
+      const pts = series.get(sym.name) ?? [];
+      pts.push({ value: sym.severity, date: log.date });
+      series.set(sym.name, pts);
     }
   }
-  return Array.from(map.entries())
-    .map(([name, { count, lastDate }]) => ({ name, daysReported: count, totalDays: total, lastDate }))
-    .sort((a, b) => b.daysReported - a.daysReported);
+  return Array.from(series.entries())
+    .map(([name, pts]) => {
+      const first = pts[0], latest = pts[pts.length - 1];
+      const peak = pts.reduce((m, p) => (p.value > m.value ? p : m), pts[0]);
+      const delta = latest.value - first.value;
+      return {
+        name, first, latest, peak,
+        avg: Math.round((pts.reduce((a, p) => a + p.value, 0) / pts.length) * 10) / 10,
+        change: pts.length < 2 ? null : delta >= 1 ? "worse" as const : delta <= -1 ? "better" as const : "steady" as const,
+      };
+    })
+    .sort((a, b) => b.latest.value - a.latest.value || b.avg - a.avg);
 }
 
 interface EpisodeRow {
   date: string;
   time: string | null;
   description: string | null;
+  episode: NonNullable<DailyLog["episode"]>;
 }
 
 function computeEpisodes(logs: DailyLog[]): EpisodeRow[] {
@@ -121,6 +132,7 @@ function computeEpisodes(logs: DailyLog[]): EpisodeRow[] {
       date: l.date,
       time: (l.episode as { occurred: boolean; time?: string; description?: string }).time || null,
       description: (l.episode as { occurred: boolean; time?: string; description?: string }).description || null,
+      episode: l.episode!,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -410,17 +422,25 @@ function ClinicalReport({
               <table>
                 <thead>
                   <tr>
-                    <th className="text-xs text-slate-500 font-semibold w-1/2">Symptom</th>
-                    <th className="text-xs text-slate-500 font-semibold">Days Reported</th>
-                    <th className="text-xs text-slate-500 font-semibold">Last Occurrence</th>
+                    <th className="text-xs text-slate-500 font-semibold">Symptom (0–10)</th>
+                    <th className="text-xs text-slate-500 font-semibold">First → Latest</th>
+                    <th className="text-xs text-slate-500 font-semibold">Average</th>
+                    <th className="text-xs text-slate-500 font-semibold">Peak</th>
+                    <th className="text-xs text-slate-500 font-semibold">Change</th>
                   </tr>
                 </thead>
                 <tbody>
                   {symptomRows.map((row, i) => (
                     <tr key={i}>
                       <td className="text-sm font-semibold text-navy py-2">{row.name}</td>
-                      <td className="text-sm text-slate-700 py-2">{row.daysReported} / {row.totalDays}</td>
-                      <td className="text-sm text-slate-500 py-2">{fmtMed(row.lastDate)}</td>
+                      <td className="text-sm text-slate-700 py-2">
+                        {row.first.value} → <span className="font-semibold">{row.latest.value}</span>
+                      </td>
+                      <td className="text-sm text-slate-700 py-2">{row.avg}</td>
+                      <td className="text-sm text-slate-700 py-2">{row.peak.value} <span className="text-slate-400">({new Date(row.peak.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })})</span></td>
+                      <td className="text-sm py-2" style={{ color: row.change === "worse" ? "#B91C1C" : row.change === "better" ? "#166534" : "#64748B" }}>
+                        {row.change === "worse" ? "↑ Worse" : row.change === "better" ? "↓ Better" : row.change === "steady" ? "Steady" : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -441,6 +461,7 @@ function ClinicalReport({
                     </span>
                     <span className="text-slate-700 leading-relaxed">
                       {ep.description ?? <span className="italic text-slate-400">No description logged.</span>}
+                      <EpisodeFollowUp episode={ep.episode} className="text-sm text-slate-600 mt-0.5" />
                     </span>
                   </div>
                 ))}

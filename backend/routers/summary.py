@@ -11,7 +11,6 @@ from openai import OpenAI
 from database import get_db
 import models
 from auth import get_current_user, require_not_clinician
-from routers.medications import lookup_known_side_effects
 from instruments import INSTRUMENTS
 from services.aggregation import build_patient_aggregate
 
@@ -169,14 +168,26 @@ def generate_summary(
     total_logs = agg["total_logs"]
 
     # Build symptom tracking text
+    # Severity progression per symptom (first → latest, average, peak) — how
+    # bad it was and which way it moved matters more than how many days it
+    # was logged, since many caregivers rate every symptom every day.
+    severity_series: dict = defaultdict(list)
+    for log in logs:  # date-ascending
+        for sym in (log.symptoms or []):
+            if sym.get("severity") is not None:
+                severity_series[sym["name"]].append((log.date.isoformat(), sym["severity"]))
     symptom_lines = []
     for name, counts in agg["symptom_stats"].items():
-        logged_days = counts["days_present"]
-        not_logged = total_logs - logged_days
-        symptom_lines.append(
-            f"  - {name}: {counts['severe']} Severe days, {counts['moderate']} Moderate days, "
-            f"{not_logged} days not logged"
+        pts = severity_series.get(name) or []
+        if not pts:
+            continue
+        peak = max(pts, key=lambda p: p[1])
+        line = (
+            f"  - {name}: average {counts['avg_severity']}/10; first {pts[0][1]}/10 ({pts[0][0]}) → "
+            f"latest {pts[-1][1]}/10 ({pts[-1][0]}); peak {peak[1]}/10 on {peak[0]}; "
+            f"severe (8+) on {counts['severe']} day(s), moderate (5–7) on {counts['moderate']}"
         )
+        symptom_lines.append(line)
     symptom_tracking_text = "\n".join(symptom_lines) if symptom_lines else "  No symptoms logged."
 
     med_list_text = "\n".join(
@@ -243,6 +254,17 @@ def generate_summary(
     stat_lines = [f"- Total log entries: {total_logs}"]
     if avg_sleep is not None:
         stat_lines.append(f"- Average sleep: {avg_sleep} hours/night")
+        # Sleep is a target, not "more is better" — judge it against the
+        # caregiver's goal when one is set.
+        sleep_goal = user_config.get("sleep_goal_hours")
+        if isinstance(sleep_goal, (int, float)) and sleep_goal > 0 and agg["sleep_vals"]:
+            vals = agg["sleep_vals"]
+            on_target = sum(1 for v in vals if abs(v - sleep_goal) <= 1)
+            stat_lines.append(
+                f"- Sleep goal set by caregiver: {_fmt_num(sleep_goal)} hours/night; {on_target} of {len(vals)} nights within 1 hour of it; "
+                f"longest {_fmt_num(max(vals))}h, shortest {_fmt_num(min(vals))}h. Sleep far ABOVE the goal is NOT better — "
+                f"describe nights far from the goal in either direction as concerning"
+            )
     if avg_mood is not None:
         stat_lines.append(f"- Average mood score: {avg_mood}/10")
     if any(hydration_counts.get(k) for k in ("Good", "Fair", "Poor")):
@@ -252,13 +274,12 @@ def generate_summary(
         )
     aggregated_stats_text = "\n".join(stat_lines)
 
-    # Build known vs observed side effects context per medication
+    # Observed side effects per medication — what the caregiver logged, with
+    # frequency and severity. Deliberately NOT compared against a "known"
+    # list: that list is incomplete, and labelling an effect expected or
+    # unexpected misled caregivers (e.g. Clozapine constipation/sedation).
     known_se_context_lines = []
-    med_known_effects: dict = {}
     for med in medications:
-        known = lookup_known_side_effects(med.name)
-        med_known_effects[med.id] = {e["name"]: e for e in known}
-        known_strs = [f"{e['name']} ({e['frequency']})" for e in known] or ["none on record"]
         # Gather observed side effects for this med across all logs
         observed_counts: dict = defaultdict(lambda: {"count": 0, "severity_sum": 0})
         for log in logs:
@@ -270,12 +291,9 @@ def generate_summary(
         observed_strs = []
         for se_name, data in observed_counts.items():
             avg_sev = round(data["severity_sum"] / data["count"], 1)
-            is_known = se_name in med_known_effects[med.id]
-            observed_strs.append(f"{se_name} on {data['count']} day(s) (avg severity {avg_sev}/10){' [known side effect]' if is_known else ' [unexpected]'}")
+            observed_strs.append(f"{se_name} on {data['count']} day(s) (avg severity {avg_sev}/10)")
         observed_text = ", ".join(observed_strs) if observed_strs else "none reported"
-        known_se_context_lines.append(
-            f"  {med.name}:\n    Known: {', '.join(known_strs)}\n    Observed: {observed_text}"
-        )
+        known_se_context_lines.append(f"  {med.name}: {observed_text}")
     known_se_context = "\n".join(known_se_context_lines) or "  No medications tracked."
 
     # Style guidance for the AI
@@ -332,7 +350,7 @@ PATIENT CONTEXT: {condition_context}
 TREATMENT PLAN (what was planned — compare against what actually happened in the logs):
 {treatment_plan_text}
 
-MEDICATIONS AND KNOWN SIDE EFFECTS (Known = documented for this drug; Observed = what caregiver logged; [known side effect] = aligns with drug profile; [unexpected] = not in drug profile):
+OBSERVED MEDICATION SIDE EFFECTS (what the caregiver logged, with days and average severity):
 {known_se_context}
 
 MEDICATION ADHERENCE (scheduled doses only — days a medication was not scheduled are excluded, never counted as missed):
@@ -347,7 +365,7 @@ CUSTOM VITALS / LAB VALUES (entered by the caregiver when measured — sparse re
 {progress_section}AGGREGATED STATISTICS:
 {aggregated_stats_text}
 
-SYMPTOM TRACKING (Severity on a 1–10 scale — out of {total_logs} logged days):
+SYMPTOM SEVERITY PROGRESSION (1–10, higher is worse — describe how severity changed, not how many days it was logged):
 {symptom_tracking_text}
 
 ACTIVITY FREQUENCY (number of days each activity was logged):
@@ -380,9 +398,8 @@ Please generate a summary as JSON with exactly these fields:
   ],
   "medication_side_effects": {{
     "Med Name (e.g. Sertraline 50mg)": {{
-      "known": ["nausea (common)", "headache (common)"],
       "observed": ["nausea on 1 day (avg severity 7.0/10)"],
-      "clinical_note": "1-2 sentence note: does observed align with known? Any management suggestions or flags?"
+      "clinical_note": "1-2 sentence factual note on frequency, severity and timing to raise with the doctor"
     }}
   }},
   "patterns": [
@@ -408,9 +425,9 @@ Please generate a summary as JSON with exactly these fields:
         f"substance avoidance violations, and progress toward care goals. "
         f"Include treatment plan comparisons in the patterns and discussion_items fields where relevant. "
         f"Highlight correlations between medication adherence, activities, and symptom severity. "
-        f"For the medication_side_effects field: for each medication, compare known drug side effects against what was actually observed. "
-        f"Flag observed side effects that align with the known profile as expected. "
-        f"Flag any observed side effects marked [unexpected] as requiring clinical attention. "
+        f"For the medication_side_effects field: for each medication, report what was observed — how often and how severe. "
+        f"Never describe a side effect as expected, unexpected, typical, atypical, known or unknown for the drug; "
+        f"do not judge it against a drug profile. Severe or frequent side effects should be raised for the doctor. "
         f"If no side effects were observed, state that clearly and note it as reassuring. "
         f"Flag anything that warrants the doctor's attention. "
         f"Do not speculate beyond what the data shows. "

@@ -62,6 +62,9 @@ export interface DashboardConfig {
   custom_vitals?: Array<CustomVital | string>; // legacy entries are bare names
   progress_areas?: ProgressArea[];
   track_progress?: boolean; // opt-in; off unless the caregiver turns it on
+  sleep_goal_hours?: number | null; // target nightly sleep; sleep is judged against it
+  episode_outcomes?: string[];   // caregiver's own "what happened as a result" options
+  episode_next_steps?: string[]; // caregiver's own "next step" options
   show_socialization?: boolean;
   // Display only — the underlying value logged is still 0-10 either way (no
   // schema change, same DailyLog.symptoms shape). "words" shows a four-tile
@@ -130,7 +133,10 @@ export interface Episode {
   occurred: boolean;
   time: string;
   description: string;
-  outcome?: EpisodeOutcome | null;
+  // One of EpisodeOutcome, or the caregiver's own wording (see lib/episodes.ts).
+  outcome?: EpisodeOutcome | string | null;
+  // What happens now: preset or caregiver-defined steps, e.g. "Contact the doctor".
+  next_steps?: string[];
   // Present only when backfilling an episode that spans days before today's
   // log date — start/end describe the episode itself, independent of which
   // day's entry this is filed under. Absent for a same-day episode (start/end
@@ -275,7 +281,7 @@ export interface PatternItem {
 }
 
 export interface MedicationSideEffectSummary {
-  known: string[];
+  known?: string[]; // older saved summaries only — no longer shown
   observed: string[];
   clinical_note: string;
 }

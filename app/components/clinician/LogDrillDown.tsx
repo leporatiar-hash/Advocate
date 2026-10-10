@@ -1,5 +1,6 @@
 import type { DailyLog, MedicationTaken } from "../../lib/types";
 import { hasProgress, ratingText, readProgress } from "../../lib/progress";
+import { EpisodeFollowUp } from "../EpisodeFollowUp";
 
 const SIMPLE_TIME_LABELS: Record<string, string> = {
   "08:00": "Morning",
@@ -103,6 +104,16 @@ export function LogDrillDown({ log }: { log: DailyLog }) {
               );
             })}
           </div>
+        </Section>
+      )}
+
+      {log.episode?.occurred && (
+        <Section title="Episode">
+          <p className="text-sm" style={{ color: "var(--cp-text)" }}>
+            {log.episode.description || "Episode logged with no description."}
+            {log.episode.time ? ` · ${log.episode.time}` : ""}
+          </p>
+          <EpisodeFollowUp episode={log.episode} className="text-sm mt-1" />
         </Section>
       )}
 

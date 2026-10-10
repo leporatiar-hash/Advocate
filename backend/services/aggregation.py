@@ -187,6 +187,29 @@ def _calculate_adherence(logs, medications) -> dict:
     }
 
 
+_OUTCOME_LABELS = {
+    "held_at_home": "handled at home",
+    "crisis_line": "called the crisis line",
+    "ed_visit": "ER visit",
+    "admitted": "admitted",
+}
+
+
+def _episode_for_prompt(episode) -> Optional[dict]:
+    """A logged episode in plain terms: what happened, the result (preset or
+    the caregiver's own wording) and the next steps they noted."""
+    if not isinstance(episode, dict) or not episode.get("occurred"):
+        return None
+    out = {"what_happened": episode.get("description") or "no description"}
+    if episode.get("time"):
+        out["time"] = episode["time"]
+    if episode.get("outcome"):
+        out["result"] = _OUTCOME_LABELS.get(episode["outcome"], episode["outcome"])
+    if episode.get("next_steps"):
+        out["next_steps"] = list(episode["next_steps"])
+    return out
+
+
 def group_observation_periods(logs) -> list:
     """Collapse consecutive `same_as_yesterday` entries into the single real
     observation they represent. The caregiver's "same as yesterday" quick-log
@@ -385,6 +408,7 @@ def build_patient_aggregate(
             "lifestyle": log.lifestyle,
             "vitals": _log_vitals_for_prompt(log),
             "progress": progress_for_prompt(log.progress),
+            "episode": _episode_for_prompt(log.episode),
             "medications_taken": log_doses(log),
             "medication_side_effects": log.medication_side_effects,
             "notes": log.notes,

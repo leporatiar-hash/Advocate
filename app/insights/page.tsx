@@ -8,7 +8,7 @@ import { withAdherenceDoses } from "../lib/medSchedule";
 import { useAuth } from "../components/AuthProvider";
 import { NavBar } from "../components/NavBar";
 import {
-  buildMetricRows, filterByTimeframe, formatValue, metricDomain, severityWord,
+  buildMetricRows, filterByTimeframe, movedTowardGoal, sleepGoalOf, formatValue, metricDomain, severityWord,
   type MetricRow, type MetricPoint, type Timeframe,
 } from "../lib/insights";
 import { TimeframeToggle, periodLabel } from "../components/TimeframeToggle";
@@ -16,6 +16,7 @@ import { lora, serif, WARM } from "../lib/warmTheme";
 import type { Patient, DailyLog, AssessmentStatusItem } from "../lib/types";
 import MetricDetailClient from "./[metric]/MetricDetailClient";
 import { Sparkline } from "../components/Sparkline";
+import { EpisodeFollowUp } from "../components/EpisodeFollowUp";
 
 const NUDGE_DISMISSED_KEY = "truefit_assessments_nudge_dismissed";
 
@@ -113,16 +114,22 @@ function buildSummaryProse(
 // words-and-arrows. Text stays in ink colors; only the arrow carries
 // better/worse color.
 function MetricListRow({
-  row, timeframe, onSelect, isLast,
+  row, timeframe, onSelect, isLast, sleepGoal,
 }: {
-  row: MetricRow; timeframe: Timeframe; onSelect: () => void; isLast: boolean;
+  row: MetricRow; timeframe: Timeframe; onSelect: () => void; isLast: boolean; sleepGoal?: number | null;
 }) {
   const points = filterByTimeframe(row.allPoints, timeframe);
   const latest = points.length ? points[points.length - 1].value : null;
   const change = computeWindowChange(points);
   const threshold = row.unit === "%" ? 2 : 0.3;
   const moved = change !== null && Math.abs(change) >= threshold;
-  const better = moved && ((change! > 0) === row.higherIsBetter);
+  // Sleep is judged against the caregiver's goal; with no goal its arrow stays neutral.
+  let better: boolean | null = moved && ((change! > 0) === row.higherIsBetter);
+  if (row.key === "sleep" && moved) {
+    const half = Math.ceil(points.length / 2);
+    const avg = (xs: MetricPoint[]) => xs.reduce((s, p) => s + p.value, 0) / xs.length;
+    better = sleepGoal ? movedTowardGoal(avg(points.slice(0, half)), avg(points.slice(half)), sleepGoal) : null;
+  }
 
   const nowText = latest === null
     ? "No entries in this period"
@@ -150,10 +157,10 @@ function MetricListRow({
       )}
       <p className="text-sm font-semibold flex-shrink-0 w-[60px] text-right" style={{ color: WARM.ink }}>
         {moved && (
-          <span style={{ color: better ? WARM.better : WARM.worse }} aria-hidden="true">{change! > 0 ? "↑ " : "↓ "}</span>
+          <span style={{ color: better === null ? WARM.inkSoft : better ? WARM.better : WARM.worse }} aria-hidden="true">{change! > 0 ? "↑ " : "↓ "}</span>
         )}
         <span className={moved ? "" : "font-normal"} style={moved ? undefined : { color: WARM.inkSoft }}>{changeText}</span>
-        {moved && <span className="sr-only">{change! > 0 ? " up" : " down"}{better ? ", better" : ", worse"}</span>}
+        {moved && <span className="sr-only">{change! > 0 ? " up" : " down"}{better === null ? "" : better ? ", better" : ", worse"}</span>}
       </p>
       <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#b8c7bd" }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -162,8 +169,35 @@ function MetricListRow({
   );
 }
 
-function MetricGroup({ title, rows, timeframe, onSelect }: {
-  title: string; rows: MetricRow[]; timeframe: Timeframe; onSelect: (key: string) => void;
+// Episodes in the selected period, newest first — what happened, the result
+// and the caregiver's next steps, so follow-ups don't get lost in the log.
+function EpisodesCard({ logs, timeframe }: { logs: DailyLog[]; timeframe: Timeframe }) {
+  const inPeriod = new Set(
+    filterByTimeframe(logs.filter(l => l.episode?.occurred).map(l => ({ date: l.date, value: 1 })), timeframe).map(p => p.date),
+  );
+  const episodes = logs.filter(l => l.episode?.occurred && inPeriod.has(l.date)).sort((a, b) => b.date.localeCompare(a.date));
+  if (!episodes.length) return null;
+  return (
+    <section className="space-y-2">
+      <h2 className="text-base px-1" style={{ ...serif, color: WARM.forest, fontWeight: 500 }}>Episodes</h2>
+      <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: `1px solid ${WARM.rule}` }}>
+        {episodes.map((l, i) => (
+          <div key={l.id} className="px-4 py-3.5 space-y-1" style={i < episodes.length - 1 ? { borderBottom: `1px solid ${WARM.rule}` } : undefined}>
+            <p className="text-sm font-semibold" style={{ color: WARM.ink }}>
+              {new Date(l.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              {l.episode!.time && <span className="font-normal" style={{ color: WARM.inkSoft }}> · {l.episode!.time}</span>}
+            </p>
+            <p className="text-sm line-clamp-3" style={{ color: WARM.ink }}>{l.episode!.description || "No description logged."}</p>
+            <EpisodeFollowUp episode={l.episode!} className="text-sm" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MetricGroup({ title, rows, timeframe, onSelect, sleepGoal }: {
+  title: string; rows: MetricRow[]; timeframe: Timeframe; onSelect: (key: string) => void; sleepGoal?: number | null;
 }) {
   if (!rows.length) return null;
   return (
@@ -171,7 +205,7 @@ function MetricGroup({ title, rows, timeframe, onSelect }: {
       <h2 className="text-base px-1" style={{ ...serif, color: WARM.forest, fontWeight: 500 }}>{title}</h2>
       <div className="bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: `1px solid ${WARM.rule}` }}>
         {rows.map((r, i) => (
-          <MetricListRow key={r.key} row={r} timeframe={timeframe} onSelect={() => onSelect(r.key)} isLast={i === rows.length - 1} />
+          <MetricListRow key={r.key} row={r} timeframe={timeframe} onSelect={() => onSelect(r.key)} isLast={i === rows.length - 1} sleepGoal={sleepGoal} />
         ))}
       </div>
     </section>
@@ -341,7 +375,9 @@ export default function InsightsPage() {
 
             <MetricGroup title="Symptoms" rows={symptomRows} timeframe={timeframe} onSelect={setSelectedMetric} />
             <MetricGroup title="Progress" rows={progressRows} timeframe={timeframe} onSelect={setSelectedMetric} />
-            <MetricGroup title="Sleep & medications" rows={routineRows} timeframe={timeframe} onSelect={setSelectedMetric} />
+            <EpisodesCard logs={logs} timeframe={timeframe} />
+            <MetricGroup title="Sleep & medications" rows={routineRows} timeframe={timeframe} onSelect={setSelectedMetric}
+              sleepGoal={sleepGoalOf(user?.user_config)} />
           </>
         )}
       </div>

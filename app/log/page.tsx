@@ -10,6 +10,8 @@ import { NavBar } from "../components/NavBar";
 import { StepLoader } from "../components/StepLoader";
 import Link from "next/link";
 import { MedicationManager } from "../components/MedicationForm";
+import { ChoiceChips } from "../components/ChoiceChips";
+import { NEXT_STEP_PRESETS, OUTCOME_PRESETS } from "../lib/episodes";
 import { DictationButton } from "../components/DictationButton";
 import { doseTimesLabel, formatShortDate, isAsNeeded, isDue, nextDueDate, parseDoseTimes, scheduleLabel } from "../lib/medSchedule";
 import { customReadings, normalizeCustomVitals, vitalLabel } from "../lib/customVitals";
@@ -397,7 +399,7 @@ function displayDoseTime(time: string | null): string {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function LogPageInner() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, updateUser } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
@@ -875,6 +877,16 @@ function LogPageInner() {
 
   function updateEpisode(patch: Partial<Episode>) {
     update({ episode: { ...draft!.episode, ...patch } });
+  }
+
+  // Caregiver-added episode choices persist in user_config for next time.
+  async function saveEpisodeChoices(key: "episode_outcomes" | "episode_next_steps", list: string[]) {
+    try {
+      const updated = await api.updateUserConfig({ [key]: list });
+      updateUser(updated as Parameters<typeof updateUser>[0]);
+    } catch {
+      toast.error("Couldn't save that option");
+    }
   }
 
   function updateVitals(patch: Partial<Vitals>) {
@@ -1607,30 +1619,20 @@ function LogPageInner() {
                   const medKnown = (knownSideEffects[med.id] ?? []).length > 0
                     ? knownSideEffects[med.id]
                     : FALLBACK_SIDE_EFFECT_OPTIONS;
-                  const freqColor = (freq: string) =>
-                    freq === "common" ? "#D97706" : freq === "uncommon" ? "#6366F1" : "#94A3B8";
-                  const freqBg = (freq: string) =>
-                    freq === "common" ? "#FEF3C7" : freq === "uncommon" ? "#EEF2FF" : "#F1F5F9";
 
                   return (
                     <div className="space-y-4 border-l-2 border-amber-200 pl-3">
-                      {(knownSideEffects[med.id] ?? []).length > 0 && (
-                        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#94A3B8" }}>
-                          Known side effects to watch for
-                        </p>
-                      )}
+                      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#94A3B8" }}>
+                        Quick picks
+                      </p>
                       <div className="grid grid-cols-2 gap-2">
                         {medKnown.map(effect => {
                           const active = mse?.side_effects.some(s => s.name === effect.name) ?? false;
                           return (
                             <button key={effect.name} type="button" onClick={() => toggleSideEffect(med.id, effect.name)}
-                              className="text-left px-3 py-2 rounded-lg border text-sm font-medium transition-all space-y-0.5"
-                              style={{ borderColor: active ? "#EF4444" : "#E2E8F0", background: active ? "#FEF2F2" : "white" }}>
-                              <span className="block" style={{ color: active ? "#EF4444" : "#374151" }}>{effect.name}</span>
-                              <span className="inline-block text-xs font-semibold px-1.5 py-0.5 rounded-full"
-                                style={{ background: active ? "#FECACA" : freqBg(effect.frequency), color: active ? "#EF4444" : freqColor(effect.frequency) }}>
-                                {effect.frequency}
-                              </span>
+                              className="text-left px-3 py-2 rounded-lg border text-sm font-medium transition-all"
+                              style={{ borderColor: active ? "#EF4444" : "#E2E8F0", background: active ? "#FEF2F2" : "white", color: active ? "#EF4444" : "#374151" }}>
+                              {effect.name}
                             </button>
                           );
                         })}
@@ -1638,7 +1640,7 @@ function LogPageInner() {
 
                       {(mse?.side_effects ?? []).some(se => !medKnown.find(k => k.name === se.name)) && (
                         <div className="space-y-1.5">
-                          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#94A3B8" }}>Other observed</p>
+                          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#94A3B8" }}>Also logged</p>
                           <div className="flex flex-wrap gap-2">
                             {(mse?.side_effects ?? [])
                               .filter(se => !medKnown.find(k => k.name === se.name))
@@ -1878,20 +1880,61 @@ function LogPageInner() {
                     className="w-full px-4 py-3 rounded-xl border border-rose-200 text-navy text-base focus:outline-none resize-none bg-white"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm text-slate-500">What happened as a result?</label>
-                  <select
-                    value={draft.episode.outcome ?? ""}
-                    onChange={e => updateEpisode({ outcome: (e.target.value || null) as EpisodeOutcome | null })}
-                    className="w-full px-4 py-3 rounded-xl border border-rose-200 text-navy text-base focus:outline-none bg-white"
-                  >
-                    <option value="">Not sure yet</option>
-                    <option value="held_at_home">Held at home</option>
-                    <option value="crisis_line">Called the crisis line</option>
-                    <option value="ed_visit">ER visit</option>
-                    <option value="admitted">Admitted</option>
-                  </select>
-                </div>
+                {(() => {
+                  const customOutcomes = user?.user_config?.episode_outcomes ?? [];
+                  const customSteps = user?.user_config?.episode_next_steps ?? [];
+                  const outcome = draft.episode.outcome ?? null;
+                  const steps = draft.episode.next_steps ?? [];
+                  const outcomeChoices = [
+                    ...OUTCOME_PRESETS,
+                    ...customOutcomes.map(c => ({ value: c, label: c, custom: true })),
+                    // A saved custom outcome that was later removed from the list still shows.
+                    ...(outcome && !OUTCOME_PRESETS.some(o => o.value === outcome) && !customOutcomes.includes(outcome)
+                      ? [{ value: outcome, label: outcome }] : []),
+                  ];
+                  const stepChoices = [
+                    ...NEXT_STEP_PRESETS.map(s => ({ value: s, label: s })),
+                    ...customSteps.map(c => ({ value: c, label: c, custom: true })),
+                    ...steps.filter(s => !NEXT_STEP_PRESETS.includes(s) && !customSteps.includes(s)).map(s => ({ value: s, label: s })),
+                  ];
+                  return (
+                    <>
+                      <div className="space-y-1.5">
+                        <label className="text-sm text-slate-500">What happened as a result?</label>
+                        <ChoiceChips
+                          choices={outcomeChoices}
+                          selected={outcome ? [outcome] : []}
+                          onToggle={v => updateEpisode({ outcome: outcome === v ? null : v })}
+                          onAdd={label => {
+                            if (!customOutcomes.includes(label) && !OUTCOME_PRESETS.some(o => o.label === label)) {
+                              saveEpisodeChoices("episode_outcomes", [...customOutcomes, label]);
+                            }
+                            updateEpisode({ outcome: OUTCOME_PRESETS.find(o => o.label === label)?.value ?? label });
+                          }}
+                          onRemove={v => saveEpisodeChoices("episode_outcomes", customOutcomes.filter(c => c !== v))}
+                          addPlaceholder="e.g. Called his psychiatrist"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm text-slate-500">What&apos;s the next step? <span className="text-slate-400">(pick any)</span></label>
+                        <ChoiceChips
+                          multi
+                          choices={stepChoices}
+                          selected={steps}
+                          onToggle={v => updateEpisode({ next_steps: steps.includes(v) ? steps.filter(s => s !== v) : [...steps, v] })}
+                          onAdd={label => {
+                            if (!customSteps.includes(label) && !NEXT_STEP_PRESETS.includes(label)) {
+                              saveEpisodeChoices("episode_next_steps", [...customSteps, label]);
+                            }
+                            if (!steps.includes(label)) updateEpisode({ next_steps: [...steps, label] });
+                          }}
+                          onRemove={v => saveEpisodeChoices("episode_next_steps", customSteps.filter(c => c !== v))}
+                          addPlaceholder="e.g. Book a blood test"
+                        />
+                      </div>
+                    </>
+                  );
+                })()}
                 <div className="flex items-center justify-between">
                   <label className="text-sm text-slate-500">This started on an earlier day</label>
                   <Toggle

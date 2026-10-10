@@ -224,20 +224,6 @@ function MedSafetyCard({ data }: { data: Record<string, MedicationSideEffectSumm
             <div key={medName} className="space-y-2">
               <p className="text-base font-bold text-navy">{medName}</p>
 
-              {info.known.length > 0 && (
-                <div>
-                  <p className="text-sm font-semibold mb-1" style={{ color: "#7C3AED" }}>Known side effects</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {info.known.map((k, i) => (
-                      <span key={i} className="text-xs px-2 py-0.5 rounded-full font-medium"
-                        style={{ background: "#EDE9FE", color: "#5B21B6" }}>
-                        {k}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div>
                 <p className="text-sm font-semibold mb-1" style={{ color: hasObserved ? "#DC2626" : "#4a7c59" }}>
                   Observed

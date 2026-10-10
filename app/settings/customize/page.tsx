@@ -148,6 +148,7 @@ export default function CustomizePage() {
 
   // Progress / improvement areas
   const [trackProgress, setTrackProgress] = useState(false);
+  const [sleepGoal, setSleepGoal] = useState<string>("");
   const [progressAreas, setProgressAreas] = useState<ProgressArea[]>([]);
   const [newAreaName, setNewAreaName] = useState("");
   const [newAreaScale, setNewAreaScale] = useState<ProgressScale>("numeric");
@@ -162,6 +163,7 @@ export default function CustomizePage() {
   const loadFromUser = useCallback((u: User) => {
     const cfg = u.user_config;
     setTrackProgress(cfg?.track_progress === true);
+    setSleepGoal(cfg?.sleep_goal_hours ? String(cfg.sleep_goal_hours) : "");
     setProgressAreas(normalizeProgressAreas(cfg?.progress_areas));
     setAreaRenames({});
 
@@ -348,6 +350,7 @@ export default function CustomizePage() {
         custom_vitals: customVitals,
         progress_areas: progressAreas,
         track_progress: trackProgress,
+        sleep_goal_hours: (() => { const g = parseFloat(sleepGoal.replace(",", ".")); return g > 0 && g <= 16 ? g : null; })(),
         substance_fields: [
           ...(showCigarettes ? ["cigarettes"] : []),
           ...(showAlcohol ? ["alcohol"] : []),
@@ -573,6 +576,14 @@ export default function CustomizePage() {
                 <Toggle value={trackingModules.has(t.key)} onChange={() => toggleModule(t.key)} />
               </div>
             ))}
+            {trackingModules.has("sleep") && (
+              <label className="flex items-center justify-between gap-3 pl-1">
+                <span className="text-sm text-slate-600">Sleep goal <span className="text-slate-400">(hours per night, optional)</span></span>
+                <input type="number" inputMode="decimal" min={1} max={16} step={0.5} value={sleepGoal}
+                  onChange={e => setSleepGoal(e.target.value)} placeholder="e.g. 10"
+                  className="w-20 px-3 py-2 rounded-xl border border-slate-200 text-base text-navy text-center bg-white" />
+              </label>
+            )}
           </div>
 
           {/* Custom vitals */}
