@@ -484,7 +484,7 @@ export default function DashboardPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </Link>
-                <Link href="/print" className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-[#f7faf8] active:bg-[#eef4f0]" style={{ borderBottom: "1px solid #e3ebe5" }}>
+                <Link href="/summary" className="flex items-center justify-between gap-3 px-4 py-3.5 transition-colors hover:bg-[#f7faf8] active:bg-[#eef4f0]" style={{ borderBottom: "1px solid #e3ebe5" }}>
                   <div className="min-w-0">
                     <p className="text-base font-semibold text-navy">Printable report</p>
                     <p className="text-sm warm-soft mt-0.5">The last 7 or 30 days, ready to hand over</p>
