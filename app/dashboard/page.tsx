@@ -443,7 +443,7 @@ export default function DashboardPage() {
             </Link>
 
             <Link
-              href="/print"
+              href="/summary"
               className="flex items-center justify-between bg-white rounded-2xl px-5 py-4 shadow-sm border border-slate-100 transition-colors active:bg-slate-50"
             >
               <div>
